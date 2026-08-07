@@ -6,18 +6,10 @@ from indicators import add_indicators
 from strategy import generate_signal
 from telegram_bot import send_signal
 
-import os
-
-print("TWELVE_DATA_API_KEY loaded:", bool(os.getenv("TWELVE_DATA_API_KEY")))
-
 
 def check_market():
 
     print("Checking gold market...")
-
-from telegram_bot import send_signal
-send_signal("🟡 GoldPro Bot Test - Telegram OK")
-
 
     df = get_gold_data()
 
@@ -34,15 +26,15 @@ send_signal("🟡 GoldPro Bot Test - Telegram OK")
     if result["signal"] != "NO SIGNAL":
 
         message = f"""
-🟡 <b>Gold Signal</b>
+🟡 <b>GoldPro Signal Bot</b>
 
 📌 Signal: {result['signal']}
 
 💰 Price: {result['price']}
 
-🎯 Confidence: {result['confidence']}%
+📊 Confidence: {result['confidence']}%
 
-📊 Score: {result['score']}
+Score: {result['score']}
 
 RSI: {result['rsi']:.2f}
 ADX: {result['adx']:.2f}
@@ -54,7 +46,7 @@ ATR: {result['atr']:.2f}
 
 print("🟡 GoldPro Signal Bot Started")
 
-
+schedule.every(5).minutes.do(check_market)
 
 check_market()
 
