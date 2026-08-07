@@ -1,46 +1,62 @@
 import requests
 import pandas as pd
-from config import FINNHUB_API_KEY
-from datetime import datetime, timedelta
+
+from config import TWELVE_DATA_API_KEY, SYMBOL, TIMEFRAME, CANDLE_LIMIT
 
 
 def get_gold_data():
+
+    if not TWELVE_DATA_API_KEY:
+        print("API error: TWELVE_DATA_API_KEY is missing")
+        return None
+
+    url = "https://api.twelvedata.com/time_series"
+
+    params = {
+        "symbol": SYMBOL,
+        "interval": TIMEFRAME,
+        "outputsize": CANDLE_LIMIT,
+        "apikey": TWELVE_DATA_API_KEY
+    }
+
     try:
-        # Finnhub Forex symbol for Gold
-        symbol = "OANDA:XAU_USD"
+        response = requests.get(url, params=params, timeout=30)
 
-        end = int(datetime.now().timestamp())
-        start = int((datetime.now() - timedelta(hours=24)).timestamp())
-
-        url = "https://finnhub.io/api/v1/forex/candle"
-
-        params = {
-            "symbol": symbol,
-            "resolution": "5",
-            "from": start,
-            "to": end,
-            "token": FINNHUB_API_KEY
-        }
-
-        response = requests.get(url, params=params)
         data = response.json()
 
-        if data.get("s") != "ok":
+        if "status" in data and data["status"] == "error":
             print("API error:", data)
             return None
 
-        df = pd.DataFrame({
-            "time": data["t"],
-            "open": data["o"],
-            "high": data["h"],
-            "low": data["l"],
-            "close": data["c"],
-            "volume": data["v"]
-        })
+        if "values" not in data:
+            print("Data error:", data)
+            return None
 
-        df["time"] = pd.to_datetime(df["time"], unit="s")
+        df = pd.DataFrame(data["values"])
+
+        df["datetime"] = pd.to_datetime(df["datetime"])
+
+        for column in ["open", "high", "low", "close"]:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+
+        if "volume" in df.columns:
+            df["volume"] = pd.to_numeric(
+                df["volume"],
+                errors="coerce"
+            )
+
+        df = df.sort_values("datetime").reset_index(drop=True)
+
+        df.rename(
+            columns={"datetime": "time"},
+            inplace=True
+        )
 
         return df
+
+    except requests.RequestException as e:
+        print("Connection error:", e)
+        return None
 
     except Exception as e:
         print("Data error:", e)
