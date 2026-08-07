@@ -1,12 +1,12 @@
 import time
 import schedule
 from datetime import datetime, timezone, timedelta
-from signal_tracker import save_signal
 
 from data_feed import get_gold_data
 from indicators import add_indicators
 from strategy import generate_signal
 from telegram_bot import send_signal
+from signal_tracker import save_signal
 
 
 def iran_time():
@@ -21,92 +21,67 @@ def check_market():
     df = get_gold_data()
 
     if df is None:
+        print("No data received")
+
         send_signal(
-            "🟡 GoldPro Bot\n\n❌ دریافت اطلاعات بازار ناموفق بود"
+            "🟡 <b>GoldPro Signal Bot</b>\n\n"
+            "❌ دریافت اطلاعات بازار ناموفق بود"
         )
+
         return
 
+    try:
+        df = add_indicators(df)
 
-    df = add_indicators(df)
+        result = generate_signal(df)
 
-    result = generate_signal(df)
+        print(result)
 
-    print(result)
+    except Exception as e:
+        print("Analysis error:", e)
+
+        send_signal(
+            "🟡 <b>GoldPro Signal Bot</b>\n\n"
+            f"❌ خطا در تحلیل بازار:\n{e}"
+        )
+
+        return
 
 
     signal = result["signal"]
 
 
+    # --------------------------------
+    # BUY / SELL
+    # --------------------------------
+
     if signal == "BUY":
-        emoji = "🟢"
-
-    elif signal == "SELL":
-        emoji = "🔴"
-
-    else:
-        emoji = "⚪"
-
-
-
-    if signal == "NO SIGNAL":
 
         message = f"""
 🟡 <b>GoldPro Signal Bot</b>
 
-{emoji} وضعیت:
-<b>WAITING</b>
-
-💰 Price:
-{result['price']}
-
-📊 Confidence:
-{result['confidence']}%
-
-📈 Score:
-{result['score']}
-
-📌 دلیل:
-{', '.join(result['reasons'])}
-
-RSI: {result['rsi']:.2f}
-ADX: {result['adx']:.2f}
-
-🕒 Iran Time:
-{iran_time()}
-
-⏱ Timeframe:
-5M
-"""
-
-
-    else:
-
-        message = f"""
-🟡 <b>GoldPro Signal Bot</b>
-
-{emoji} Signal:
-<b>{signal}</b>
+🟢 <b>BUY SIGNAL</b>
 
 💰 Entry:
-{result['price']}
+<b>{result['price']:.2f}</b>
 
 🎯 TP1:
-{result['tp1']}
+<b>{result['tp1']:.2f}</b>
 
 🎯 TP2:
-{result['tp2']}
+<b>{result['tp2']:.2f}</b>
 
 🛑 SL:
-{result['sl']}
+<b>{result['sl']:.2f}</b>
 
 📊 Confidence:
-{result['confidence']}%
+<b>{result['confidence']}%</b>
 
 ⭐ Quality:
-{result['quality']}
+<b>{result['quality']}</b>
 
 📈 Score:
-{result['score']}
+<b>{result['score']}</b>
 
 📌 Reason:
 {', '.join(result['reasons'])}
@@ -117,29 +92,146 @@ RSI:
 ADX:
 {result['adx']:.2f}
 
+ATR:
+{result['atr']:.2f}
+
 🕒 Iran Time:
 {iran_time()}
 
 ⏱ Timeframe:
-5M
+<b>5M</b>
 """
-if result["signal"] != "NO SIGNAL":
-    save_signal(result)
 
+
+    elif signal == "SELL":
+
+        message = f"""
+🟡 <b>GoldPro Signal Bot</b>
+
+🔴 <b>SELL SIGNAL</b>
+
+💰 Entry:
+<b>{result['price']:.2f}</b>
+
+🎯 TP1:
+<b>{result['tp1']:.2f}</b>
+
+🎯 TP2:
+<b>{result['tp2']:.2f}</b>
+
+🛑 SL:
+<b>{result['sl']:.2f}</b>
+
+📊 Confidence:
+<b>{result['confidence']}%</b>
+
+⭐ Quality:
+<b>{result['quality']}</b>
+
+📈 Score:
+<b>{result['score']}</b>
+
+📌 Reason:
+{', '.join(result['reasons'])}
+
+RSI:
+{result['rsi']:.2f}
+
+ADX:
+{result['adx']:.2f}
+
+ATR:
+{result['atr']:.2f}
+
+🕒 Iran Time:
+{iran_time()}
+
+⏱ Timeframe:
+<b>5M</b>
+"""
+
+
+    # --------------------------------
+    # NO SIGNAL
+    # --------------------------------
+
+    else:
+
+        message = f"""
+🟡 <b>GoldPro Signal Bot</b>
+
+⚪ <b>WAITING / NO SIGNAL</b>
+
+💰 Price:
+<b>{result['price']:.2f}</b>
+
+📊 Confidence:
+<b>{result['confidence']}%</b>
+
+⭐ Quality:
+<b>{result['quality']}</b>
+
+📈 Score:
+<b>{result['score']}</b>
+
+📌 Reason:
+{', '.join(result['reasons'])}
+
+RSI:
+{result['rsi']:.2f}
+
+ADX:
+{result['adx']:.2f}
+
+ATR:
+{result['atr']:.2f}
+
+🕒 Iran Time:
+{iran_time()}
+
+⏱ Timeframe:
+<b>5M</b>
+"""
+
+
+    # --------------------------------
+    # ذخیره فقط BUY / SELL
+    # --------------------------------
+
+    if signal != "NO SIGNAL":
+
+        try:
+            save_signal(result)
+            print("Signal saved successfully")
+
+        except Exception as e:
+            print("Tracker error:", e)
+
+
+    # --------------------------------
+    # ارسال پیام تلگرام
+    # --------------------------------
 
     send_signal(message)
 
 
+# --------------------------------
+# شروع ربات
+# --------------------------------
 
 print("🟡 GoldPro Signal Bot Started")
 
 
+# اجرای فوری
 check_market()
 
 
+# اجرای هر 5 دقیقه
 schedule.every(5).minutes.do(check_market)
 
 
 while True:
+
     schedule.run_pending()
+
     time.sleep(10)
