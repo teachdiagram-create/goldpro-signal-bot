@@ -15,6 +15,10 @@ def check_market():
 
     print("Checking gold market...")
 
+from telegram_bot import send_signal
+send_signal("🟡 GoldPro Bot Test - Telegram OK")
+
+
     df = get_gold_data()
 
     if df is None:
@@ -50,7 +54,6 @@ ATR: {result['atr']:.2f}
 
 print("🟡 GoldPro Signal Bot Started")
 
-schedule.every(5).minutes.do(check_market)
 
 
 check_market()
