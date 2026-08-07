@@ -1,4 +1,4 @@
-from config import MIN_CONFIDENCE, MIN_ADX
+from config import MIN_ADX
 
 
 def generate_signal(df):
@@ -22,8 +22,8 @@ def generate_signal(df):
         score += 20
         reasons.append("RSI oversold")
 
-    elif last["RSI"] > 70:
-        score -= 10
+    elif last["RSI"] > 75:
+        score -= 15
         reasons.append("RSI overbought")
 
 
@@ -47,15 +47,20 @@ def generate_signal(df):
 
     signal = "NO SIGNAL"
 
-    if score >= 50 and confidence >= MIN_CONFIDENCE:
+    if score >= 40 and confidence >= 50:
         signal = "BUY"
 
-    elif score <= -50 and confidence >= MIN_CONFIDENCE:
+    elif score <= -40 and confidence >= 50:
         signal = "SELL"
 
 
     price = float(last["close"])
     atr = float(last["ATR"])
+
+
+    sl = None
+    tp1 = None
+    tp2 = None
 
 
     if signal == "BUY":
@@ -64,23 +69,15 @@ def generate_signal(df):
         tp1 = price + (atr * 2)
         tp2 = price + (atr * 3)
 
+
     elif signal == "SELL":
 
         sl = price + (atr * 1.5)
         tp1 = price - (atr * 2)
         tp2 = price - (atr * 3)
 
-    else:
 
-        sl = None
-        tp1 = None
-        tp2 = None
-
-
-    if confidence >= 75:
-        quality = "VERY STRONG"
-
-    elif confidence >= 60:
+    if confidence >= 70:
         quality = "STRONG"
 
     elif confidence >= 50:
