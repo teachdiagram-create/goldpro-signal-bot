@@ -1,6 +1,7 @@
 import time
 import schedule
 from datetime import datetime, timezone, timedelta
+from signal_tracker import save_signal
 
 from data_feed import get_gold_data
 from indicators import add_indicators
@@ -122,6 +123,8 @@ ADX:
 ⏱ Timeframe:
 5M
 """
+if result["signal"] != "NO SIGNAL":
+    save_signal(result)
 
 
     send_signal(message)
