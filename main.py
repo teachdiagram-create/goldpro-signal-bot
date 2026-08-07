@@ -15,7 +15,11 @@ def check_market():
 
     if df is None:
         print("No data received")
+        send_signal(
+            "🟡 GoldPro Bot\n\n❌ No market data received"
+        )
         return
+
 
     df = add_indicators(df)
 
@@ -24,41 +28,71 @@ def check_market():
     print(result)
 
 
-    if True:
+    if result["signal"] == "BUY":
+        emoji = "🟢"
 
-        message = f"""
+    elif result["signal"] == "SELL":
+        emoji = "🔴"
+
+    else:
+        emoji = "⚪"
+
+
+    message = f"""
 🟡 <b>GoldPro Signal Bot</b>
 
-📌 Signal: <b>{result['signal']}</b>
+{emoji} Signal: <b>{result['signal']}</b>
 
-💰 Entry: {result['price']}
+💰 Entry:
+{result['price']}
 
-🎯 TP1: {result['tp1']}
-🎯 TP2: {result['tp2']}
+🎯 TP1:
+{result['tp1']}
 
-🛑 SL: {result['sl']}
+🎯 TP2:
+{result['tp2']}
 
-📊 Confidence: {result['confidence']}%
-⭐ Quality: {result['quality']}
+🛑 SL:
+{result['sl']}
 
-📈 Score: {result['score']}
+📊 Confidence:
+{result['confidence']}%
 
-RSI: {result['rsi']:.2f}
-ADX: {result['adx']:.2f}
-ATR: {result['atr']:.2f}
+⭐ Quality:
+{result['quality']}
 
-⏱ Timeframe: 5M
+📈 Score:
+{result['score']}
+
+📌 Reasons:
+{', '.join(result['reasons'])}
+
+RSI:
+{result['rsi']:.2f}
+
+ADX:
+{result['adx']:.2f}
+
+ATR:
+{result['atr']:.2f}
+
+⏱ Timeframe:
+5 Minutes
 """
 
-        send_signal(message)
+
+    send_signal(message)
 
 
 
 print("🟡 GoldPro Signal Bot Started")
 
 
+# اجرای فوری هنگام شروع
 check_market()
 
+
+# اجرای هر 5 دقیقه
 schedule.every(5).minutes.do(check_market)
 
 
