@@ -24,7 +24,7 @@ def check_market():
     print(result)
 
 
-    if result["signal"] != "NO SIGNAL":
+    if True:
 
         message = f"""
 🟡 <b>GoldPro Signal Bot</b>
