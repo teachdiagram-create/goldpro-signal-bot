@@ -45,6 +45,7 @@ ATR: {result['atr']:.2f}
 
 
 print("🟡 GoldPro Signal Bot Started")
+send_signal("🟡 GoldPro Signal Bot\n\n✅ اتصال تلگرام با موفقیت برقرار شد.")
 
 schedule.every(5).minutes.do(check_market)
 
