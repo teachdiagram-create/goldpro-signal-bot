@@ -1,10 +1,16 @@
 import time
 import schedule
+from datetime import datetime, timezone, timedelta
 
 from data_feed import get_gold_data
 from indicators import add_indicators
 from strategy import generate_signal
 from telegram_bot import send_signal
+
+
+def iran_time():
+    iran = timezone(timedelta(hours=3, minutes=30))
+    return datetime.now(iran).strftime("%Y-%m-%d %H:%M")
 
 
 def check_market():
@@ -14,9 +20,8 @@ def check_market():
     df = get_gold_data()
 
     if df is None:
-        print("No data received")
         send_signal(
-            "🟡 GoldPro Bot\n\n❌ No market data received"
+            "🟡 GoldPro Bot\n\n❌ دریافت اطلاعات بازار ناموفق بود"
         )
         return
 
@@ -28,20 +33,58 @@ def check_market():
     print(result)
 
 
-    if result["signal"] == "BUY":
+    signal = result["signal"]
+
+
+    if signal == "BUY":
         emoji = "🟢"
 
-    elif result["signal"] == "SELL":
+    elif signal == "SELL":
         emoji = "🔴"
 
     else:
         emoji = "⚪"
 
 
-    message = f"""
+
+    if signal == "NO SIGNAL":
+
+        message = f"""
 🟡 <b>GoldPro Signal Bot</b>
 
-{emoji} Signal: <b>{result['signal']}</b>
+{emoji} وضعیت:
+<b>WAITING</b>
+
+💰 Price:
+{result['price']}
+
+📊 Confidence:
+{result['confidence']}%
+
+📈 Score:
+{result['score']}
+
+📌 دلیل:
+{', '.join(result['reasons'])}
+
+RSI: {result['rsi']:.2f}
+ADX: {result['adx']:.2f}
+
+🕒 Iran Time:
+{iran_time()}
+
+⏱ Timeframe:
+5M
+"""
+
+
+    else:
+
+        message = f"""
+🟡 <b>GoldPro Signal Bot</b>
+
+{emoji} Signal:
+<b>{signal}</b>
 
 💰 Entry:
 {result['price']}
@@ -64,7 +107,7 @@ def check_market():
 📈 Score:
 {result['score']}
 
-📌 Reasons:
+📌 Reason:
 {', '.join(result['reasons'])}
 
 RSI:
@@ -73,11 +116,11 @@ RSI:
 ADX:
 {result['adx']:.2f}
 
-ATR:
-{result['atr']:.2f}
+🕒 Iran Time:
+{iran_time()}
 
 ⏱ Timeframe:
-5 Minutes
+5M
 """
 
 
@@ -88,11 +131,9 @@ ATR:
 print("🟡 GoldPro Signal Bot Started")
 
 
-# اجرای فوری هنگام شروع
 check_market()
 
 
-# اجرای هر 5 دقیقه
 schedule.every(5).minutes.do(check_market)
 
 
