@@ -6,6 +6,10 @@ from indicators import add_indicators
 from strategy import generate_signal
 from telegram_bot import send_signal
 
+import os
+
+print("TWELVE_DATA_API_KEY loaded:", bool(os.getenv("TWELVE_DATA_API_KEY")))
+
 
 def check_market():
 
