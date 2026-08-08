@@ -209,11 +209,7 @@ def check_market():
         # NO SIGNAL
         # -----------------------------
 
-        else:
-
-            message = format_market_message(result)
-
-            send_signal(message)
+     
 
 
     except Exception as e:
