@@ -68,15 +68,33 @@ def save_result(trade, outcome, exit_price):
 def add_trade(result):
 
     if result["signal"] == "NO SIGNAL":
-        return
+        return False
 
     trades = load_open_trades()
+
+    new_signal = result["signal"]
+    new_entry = float(result["price"])
+
+    # جلوگیری از ثبت سیگنال تکراری
+    for trade in trades:
+
+        same_signal = trade.get("signal") == new_signal
+
+        same_entry = abs(
+            float(trade.get("entry", 0)) - new_entry
+        ) < 0.01
+
+        if same_signal and same_entry:
+
+            print("Duplicate signal ignored")
+            return False
+
 
     trade = {
         "id": datetime.now().strftime("%Y%m%d%H%M%S"),
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "signal": result["signal"],
-        "entry": float(result["price"]),
+        "signal": new_signal,
+        "entry": new_entry,
         "tp1": float(result["tp1"]),
         "tp2": float(result["tp2"]),
         "sl": float(result["sl"]),
@@ -91,6 +109,8 @@ def add_trade(result):
 
     print("Trade tracker: trade added")
 
+    return True
+
 
 def update_trades(df):
 
@@ -99,7 +119,6 @@ def update_trades(df):
     if not trades:
         return []
 
-
     latest = df.iloc[-1]
 
     high = float(latest["high"])
@@ -107,7 +126,6 @@ def update_trades(df):
 
     remaining = []
     results = []
-
 
     for trade in trades:
 
@@ -141,7 +159,6 @@ def update_trades(df):
 
                 continue
 
-
             # TP2
             if high >= trade["tp2"]:
 
@@ -159,7 +176,6 @@ def update_trades(df):
 
                 continue
 
-
             # TP1
             if high >= trade["tp1"]:
 
@@ -172,7 +188,6 @@ def update_trades(df):
                         "outcome": "TP1 HIT",
                         "price": trade["tp1"]
                     })
-
 
         # =========================
         # SELL
@@ -202,7 +217,6 @@ def update_trades(df):
 
                 continue
 
-
             # TP2
             if low <= trade["tp2"]:
 
@@ -220,7 +234,6 @@ def update_trades(df):
 
                 continue
 
-
             # TP1
             if low <= trade["tp1"]:
 
@@ -234,9 +247,7 @@ def update_trades(df):
                         "price": trade["tp1"]
                     })
 
-
         remaining.append(trade)
-
 
     save_open_trades(remaining)
 
