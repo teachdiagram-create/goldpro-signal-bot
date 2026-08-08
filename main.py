@@ -9,6 +9,7 @@ from trade_tracker import add_trade, update_trades
 
 
 def format_market_message(result):
+
     signal = result.get("signal", "NO SIGNAL")
 
     if signal == "BUY":
@@ -64,11 +65,13 @@ ATR:
 
 
 def send_trade_result(result):
+
     outcome = result["outcome"]
     signal = result["signal"]
     price = result["price"]
 
     if outcome == "TP1 HIT":
+
         message = f"""
 🟡 <b>GoldPro Trade Update</b>
 
@@ -82,8 +85,9 @@ def send_trade_result(result):
 📊 Status:
 Partial Profit
 """
-    
+
     elif outcome == "WIN":
+
         message = f"""
 🟡 <b>GoldPro Trade Result</b>
 
@@ -99,6 +103,7 @@ WIN
 """
 
     elif outcome == "LOSS":
+
         message = f"""
 🟡 <b>GoldPro Trade Result</b>
 
@@ -114,6 +119,7 @@ LOSS
 """
 
     elif outcome == "PARTIAL WIN":
+
         message = f"""
 🟡 <b>GoldPro Trade Result</b>
 
@@ -140,57 +146,75 @@ def check_market():
 
     try:
 
-        # --------------------------------
-        # دریافت اطلاعات طلا
-        # --------------------------------
-
         df = get_gold_data()
 
         if df is None or df.empty:
+
             print("No data received")
+
             return
 
-        # --------------------------------
+
+        # -----------------------------
         # بررسی معاملات باز
-        # --------------------------------
+        # -----------------------------
 
         trade_results = update_trades(df)
 
         if trade_results:
 
             for result in trade_results:
+
                 print("Trade result:", result)
+
                 send_trade_result(result)
 
-        # --------------------------------
-        # محاسبه اندیکاتورها
-        # --------------------------------
+
+        # -----------------------------
+        # تحلیل بازار
+        # -----------------------------
 
         df = add_indicators(df)
-
-        # --------------------------------
-        # تولید سیگنال
-        # --------------------------------
 
         result = generate_signal(df)
 
         print(result)
 
-        # --------------------------------
-        # ثبت سیگنال جدید
-        # --------------------------------
 
-        if result["signal"] != "NO SIGNAL":
+        signal = result["signal"]
 
-            add_trade(result)
 
-        # --------------------------------
-        # ارسال وضعیت به تلگرام
-        # --------------------------------
+        # -----------------------------
+        # سیگنال جدید
+        # -----------------------------
 
-        message = format_market_message(result)
+        if signal != "NO SIGNAL":
 
-        send_signal(message)
+            added = add_trade(result)
+
+            if added:
+
+                # فقط سیگنال جدید ارسال شود
+
+                message = format_market_message(result)
+
+                send_signal(message)
+
+            else:
+
+                print("Duplicate signal - Telegram message skipped")
+
+
+        # -----------------------------
+        # NO SIGNAL
+        # -----------------------------
+
+        else:
+
+            message = format_market_message(result)
+
+            send_signal(message)
+
 
     except Exception as e:
 
@@ -201,22 +225,26 @@ def main():
 
     print("🟡 GoldPro Signal Bot Started")
 
-    # اجرای فوری
     check_market()
 
-    # اجرای هر 5 دقیقه
     schedule.every(5).minutes.do(check_market)
+
 
     while True:
 
         try:
+
             schedule.run_pending()
+
             time.sleep(1)
 
         except Exception as e:
+
             print("Scheduler error:", e)
+
             time.sleep(5)
 
 
 if __name__ == "__main__":
+
     main()
