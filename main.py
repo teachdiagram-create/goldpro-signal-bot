@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 
 from data_feed import get_gold_data
 from indicators import add_indicators
@@ -7,23 +8,42 @@ from telegram_bot import send_signal
 from trade_tracker import add_trade, update_trades
 
 
-CHECK_INTERVAL = 300
+# =========================================================
+# تنظیمات
+# =========================================================
 
+CANDLE_MINUTES = 5
+CHECK_DELAY_SECONDS = 5
+
+
+# =========================================================
+# پیام سیگنال
+# =========================================================
 
 def format_signal_message(result):
 
-    signal = result.get("signal", "NO SIGNAL")
-    signal_id = result.get("signal_id", "000")
+    signal = result.get(
+        "signal",
+        "NO SIGNAL"
+    )
+
+    signal_id = result.get(
+        "signal_id",
+        "000"
+    )
 
     if signal == "BUY":
+
         emoji = "🟢"
         title = f"BUY SIGNAL #{signal_id}"
 
     elif signal == "SELL":
+
         emoji = "🔴"
         title = f"SELL SIGNAL #{signal_id}"
 
     else:
+
         emoji = "⚪"
         title = "WAITING / NO SIGNAL"
 
@@ -45,7 +65,7 @@ def format_signal_message(result):
 {result.get("sl")}
 
 📊 Confidence:
-{result.get("confidence")}% 
+{result.get("confidence")}%
 
 ⭐ Quality:
 {result.get("quality")}
@@ -71,6 +91,10 @@ ATR:
 
     return message.strip()
 
+
+# =========================================================
+# پیام نتیجه معامله
+# =========================================================
 
 def format_trade_result(result):
 
@@ -142,29 +166,49 @@ def format_trade_result(result):
     return message.strip()
 
 
+# =========================================================
+# بررسی بازار
+# =========================================================
+
 def check_market():
 
-    print("Checking gold market...")
+    print(
+        "Checking gold market..."
+    )
 
     try:
+
+        # -------------------------------------------------
+        # دریافت داده
+        # -------------------------------------------------
 
         df = get_gold_data()
 
         if df is None or df.empty:
 
-            print("No data received")
+            print(
+                "No data received"
+            )
 
             return
 
+        # -------------------------------------------------
+        # اندیکاتورها
+        # -------------------------------------------------
+
         df = add_indicators(df)
+
+        # -------------------------------------------------
+        # تولید سیگنال
+        # -------------------------------------------------
 
         result = generate_signal(df)
 
         print(result)
 
-        # =========================
-        # Update existing trades
-        # =========================
+        # -------------------------------------------------
+        # بررسی معاملات باز
+        # -------------------------------------------------
 
         trade_results = update_trades(df)
 
@@ -176,16 +220,18 @@ def check_market():
 
             send_signal(message)
 
-        # =========================
-        # New signal
-        # =========================
+        # -------------------------------------------------
+        # ثبت سیگنال جدید
+        # -------------------------------------------------
 
         if result.get("signal") in [
             "BUY",
             "SELL"
         ]:
 
-            added = add_trade(result)
+            added = add_trade(
+                result
+            )
 
             if added:
 
@@ -203,20 +249,108 @@ def check_market():
         )
 
 
+# =========================================================
+# محاسبه زمان تا کندل 5 دقیقه‌ای بعدی
+# =========================================================
+
+def seconds_until_next_candle():
+
+    now = datetime.now()
+
+    current_seconds = (
+        now.minute * 60
+        + now.second
+        + now.microsecond / 1_000_000
+    )
+
+    candle_seconds = (
+        CANDLE_MINUTES * 60
+    )
+
+    remainder = (
+        current_seconds
+        % candle_seconds
+    )
+
+    wait_seconds = (
+        candle_seconds
+        - remainder
+    )
+
+    return wait_seconds
+
+
+# =========================================================
+# اجرای اصلی
+# =========================================================
+
 def main():
 
     print(
         "🟡 GoldPro Signal Bot Started"
     )
 
+    print(
+        "⏱ Waiting for 5-minute candle close..."
+    )
+
     while True:
 
-        check_market()
+        try:
 
-        time.sleep(
-            CHECK_INTERVAL
-        )
+            # -------------------------------------------------
+            # محاسبه زمان بسته‌شدن کندل بعدی
+            # -------------------------------------------------
 
+            wait_seconds = (
+                seconds_until_next_candle()
+            )
+
+            print(
+                f"Next candle check in "
+                f"{wait_seconds:.1f} seconds"
+            )
+
+            # -------------------------------------------------
+            # صبر تا بسته‌شدن کندل
+            # -------------------------------------------------
+
+            time.sleep(
+                wait_seconds
+            )
+
+            # -------------------------------------------------
+            # چند ثانیه تأخیر برای اطمینان از بسته‌شدن کندل
+            # -------------------------------------------------
+
+            time.sleep(
+                CHECK_DELAY_SECONDS
+            )
+
+            print(
+                "🕯 5-minute candle closed"
+            )
+
+            # -------------------------------------------------
+            # اجرای تحلیل
+            # -------------------------------------------------
+
+            check_market()
+
+        except Exception as e:
+
+            print(
+                "Main loop error:",
+                e
+            )
+
+            # جلوگیری از توقف کامل Worker
+            time.sleep(5)
+
+
+# =========================================================
+# START
+# =========================================================
 
 if __name__ == "__main__":
 
