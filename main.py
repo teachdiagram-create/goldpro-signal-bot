@@ -8,42 +8,24 @@ from telegram_bot import send_signal
 from trade_tracker import add_trade, update_trades
 
 
-# =========================================================
-# تنظیمات
-# =========================================================
-
 CANDLE_MINUTES = 5
 CHECK_DELAY_SECONDS = 5
 
 
-# =========================================================
-# پیام سیگنال
-# =========================================================
-
 def format_signal_message(result):
 
-    signal = result.get(
-        "signal",
-        "NO SIGNAL"
-    )
-
-    signal_id = result.get(
-        "signal_id",
-        "000"
-    )
+    signal = result.get("signal", "NO SIGNAL")
+    signal_id = result.get("signal_id", "000")
 
     if signal == "BUY":
-
         emoji = "🟢"
         title = f"BUY SIGNAL #{signal_id}"
 
     elif signal == "SELL":
-
         emoji = "🔴"
         title = f"SELL SIGNAL #{signal_id}"
 
     else:
-
         emoji = "⚪"
         title = "WAITING / NO SIGNAL"
 
@@ -92,30 +74,12 @@ ATR:
     return message.strip()
 
 
-# =========================================================
-# پیام نتیجه معامله
-# =========================================================
-
 def format_trade_result(result):
 
-    signal_id = result.get(
-        "signal_id",
-        "000"
-    )
-
-    signal = result.get(
-        "signal",
-        ""
-    )
-
-    outcome = result.get(
-        "outcome",
-        ""
-    )
-
-    price = result.get(
-        "price"
-    )
+    signal_id = result.get("signal_id", "000")
+    signal = result.get("signal", "")
+    outcome = result.get("outcome", "")
+    price = result.get("price")
 
     if outcome == "TP1 HIT":
 
@@ -166,49 +130,40 @@ def format_trade_result(result):
     return message.strip()
 
 
-# =========================================================
-# بررسی بازار
-# =========================================================
-
 def check_market():
 
-    print(
-        "Checking gold market..."
-    )
+    print("Checking gold market...")
 
     try:
-
-        # -------------------------------------------------
-        # دریافت داده
-        # -------------------------------------------------
 
         df = get_gold_data()
 
         if df is None or df.empty:
 
-            print(
-                "No data received"
-            )
+            print("No data received")
 
             return
 
-        # -------------------------------------------------
-        # اندیکاتورها
-        # -------------------------------------------------
-
         df = add_indicators(df)
 
-        # -------------------------------------------------
-        # تولید سیگنال
-        # -------------------------------------------------
+        # =================================================
+        # زمان واقعی آخرین کندل دریافتی از Twelve Data
+        # =================================================
+
+        signal_candle_time = df.iloc[-1]["time"]
+
+        print(
+            f"📌 Current closed candle: "
+            f"{signal_candle_time}"
+        )
 
         result = generate_signal(df)
 
         print(result)
 
-        # -------------------------------------------------
-        # بررسی معاملات باز
-        # -------------------------------------------------
+        # =================================================
+        # ابتدا معاملات باز را بررسی کن
+        # =================================================
 
         trade_results = update_trades(df)
 
@@ -220,17 +175,23 @@ def check_market():
 
             send_signal(message)
 
-        # -------------------------------------------------
-        # ثبت سیگنال جدید
-        # -------------------------------------------------
+        # =================================================
+        # سپس سیگنال جدید
+        # =================================================
 
         if result.get("signal") in [
             "BUY",
             "SELL"
         ]:
 
+            # ذخیره زمان واقعی کندل سیگنال
+            result["signal_candle_time"] = str(
+                signal_candle_time
+            )
+
             added = add_trade(
-                result
+                result,
+                signal_candle_time
             )
 
             if added:
@@ -249,10 +210,6 @@ def check_market():
         )
 
 
-# =========================================================
-# محاسبه زمان تا کندل 5 دقیقه‌ای بعدی
-# =========================================================
-
 def seconds_until_next_candle():
 
     now = datetime.now()
@@ -263,9 +220,7 @@ def seconds_until_next_candle():
         + now.microsecond / 1_000_000
     )
 
-    candle_seconds = (
-        CANDLE_MINUTES * 60
-    )
+    candle_seconds = CANDLE_MINUTES * 60
 
     remainder = (
         current_seconds
@@ -279,10 +234,6 @@ def seconds_until_next_candle():
 
     return wait_seconds
 
-
-# =========================================================
-# اجرای اصلی
-# =========================================================
 
 def main():
 
@@ -298,10 +249,6 @@ def main():
 
         try:
 
-            # -------------------------------------------------
-            # محاسبه زمان بسته‌شدن کندل بعدی
-            # -------------------------------------------------
-
             wait_seconds = (
                 seconds_until_next_candle()
             )
@@ -311,17 +258,9 @@ def main():
                 f"{wait_seconds:.1f} seconds"
             )
 
-            # -------------------------------------------------
-            # صبر تا بسته‌شدن کندل
-            # -------------------------------------------------
-
             time.sleep(
                 wait_seconds
             )
-
-            # -------------------------------------------------
-            # چند ثانیه تأخیر برای اطمینان از بسته‌شدن کندل
-            # -------------------------------------------------
 
             time.sleep(
                 CHECK_DELAY_SECONDS
@@ -330,10 +269,6 @@ def main():
             print(
                 "🕯 5-minute candle closed"
             )
-
-            # -------------------------------------------------
-            # اجرای تحلیل
-            # -------------------------------------------------
 
             check_market()
 
@@ -344,13 +279,8 @@ def main():
                 e
             )
 
-            # جلوگیری از توقف کامل Worker
             time.sleep(5)
 
-
-# =========================================================
-# START
-# =========================================================
 
 if __name__ == "__main__":
 
