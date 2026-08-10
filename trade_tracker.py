@@ -39,10 +39,7 @@ def load_open_trades():
 
     except Exception as e:
 
-        print(
-            "Open trades read error:",
-            e
-        )
+        print("Open trades read error:", e)
 
         return []
 
@@ -146,7 +143,6 @@ def is_in_sl_cooldown():
     if not os.path.exists(
         RESULT_FILE
     ):
-
         return False
 
     try:
@@ -175,7 +171,6 @@ def is_in_sl_cooldown():
             "LOSS",
             "PARTIAL WIN"
         ]:
-
             return False
 
         time_text = last_trade.get(
@@ -203,8 +198,7 @@ def is_in_sl_cooldown():
         if elapsed < cooldown:
 
             remaining = (
-                cooldown
-                - elapsed
+                cooldown - elapsed
             )
 
             minutes = int(
@@ -235,14 +229,11 @@ def is_in_sl_cooldown():
 # Price distance
 # =========================================================
 
-def is_price_too_close(
-    new_entry
-):
+def is_price_too_close(new_entry):
 
     if not os.path.exists(
         RESULT_FILE
     ):
-
         return False
 
     try:
@@ -267,8 +258,7 @@ def is_price_too_close(
         )
 
         distance = abs(
-            new_entry
-            - last_entry
+            new_entry - last_entry
         )
 
         if distance < MIN_SIGNAL_DISTANCE:
@@ -296,14 +286,16 @@ def is_price_too_close(
 # Add trade
 # =========================================================
 
-def add_trade(result):
+def add_trade(
+    result,
+    signal_candle_time
+):
 
     if result.get("signal") in [
         None,
         "",
         "NO SIGNAL"
     ]:
-
         return False
 
     trades = load_open_trades()
@@ -362,7 +354,7 @@ def add_trade(result):
     signal_id = get_next_signal_id()
 
     # -----------------------------------------------------
-    # زمان ثبت سیگنال
+    # زمان سیستم
     # -----------------------------------------------------
 
     signal_time = datetime.now().strftime(
@@ -381,7 +373,13 @@ def add_trade(result):
 
         "signal_id": signal_id,
 
+        # زمان اجرای برنامه
         "time": signal_time,
+
+        # زمان واقعی کندل سیگنال
+        "signal_candle_time": str(
+            signal_candle_time
+        ),
 
         "signal": new_signal,
 
@@ -409,16 +407,14 @@ def add_trade(result):
 
         "tp1_hit": False,
 
-        # زمان آخرین کندل بررسی‌شده
-        "last_candle_time": None,
+        # آخرین کندلی که بررسی شده
+        "last_candle_time": str(
+            signal_candle_time
+        ),
 
-        # ذخیره کندل‌ها
+        # ذخیره کندل‌های بعد از سیگنال
         "candles": []
     }
-
-    # -----------------------------------------------------
-    # ذخیره
-    # -----------------------------------------------------
 
     trades.append(trade)
 
@@ -426,12 +422,16 @@ def add_trade(result):
         trades
     )
 
-    # برگرداندن ID به main.py
     result["signal_id"] = signal_id
 
     print(
         f"Trade tracker: "
         f"Signal #{signal_id} added"
+    )
+
+    print(
+        f"Signal candle: "
+        f"{signal_candle_time}"
     )
 
     return True
@@ -466,7 +466,7 @@ def update_trades(df):
     remaining = []
 
     # -----------------------------------------------------
-    # بررسی تمام کندل‌ها
+    # هر معامله باز
     # -----------------------------------------------------
 
     for trade in trades:
@@ -478,8 +478,9 @@ def update_trades(df):
             "000"
         )
 
-        entry_time = trade.get(
-            "time"
+        # زمان واقعی کندلی که سیگنال روی آن صادر شده
+        signal_candle_time = trade.get(
+            "signal_candle_time"
         )
 
         last_candle_time = trade.get(
@@ -498,23 +499,30 @@ def update_trades(df):
                 candle["time"]
             )
 
-            # ---------------------------------------------
-            # کندل‌های قبل از معامله را رد کن
-            # ---------------------------------------------
+            try:
 
-            if entry_time:
+                candle_dt = pd_to_datetime(
+                    candle_time
+                )
+
+            except Exception:
+
+                continue
+
+            # =============================================
+            # مهم:
+            # کندل سیگنال و قبل از آن را بررسی نکن
+            # =============================================
+
+            if signal_candle_time:
 
                 try:
 
-                    candle_dt = pd_to_datetime(
-                        candle_time
+                    signal_dt = pd_to_datetime(
+                        signal_candle_time
                     )
 
-                    entry_dt = pd_to_datetime(
-                        entry_time
-                    )
-
-                    if candle_dt < entry_dt:
+                    if candle_dt <= signal_dt:
 
                         continue
 
@@ -522,17 +530,13 @@ def update_trades(df):
 
                     pass
 
-            # ---------------------------------------------
-            # کندل بررسی‌شده قبلی
-            # ---------------------------------------------
+            # =============================================
+            # کندل‌های قبلاً بررسی‌شده
+            # =============================================
 
             if last_candle_time:
 
                 try:
-
-                    candle_dt = pd_to_datetime(
-                        candle_time
-                    )
 
                     last_dt = pd_to_datetime(
                         last_candle_time
@@ -546,9 +550,9 @@ def update_trades(df):
 
                     pass
 
-            # ---------------------------------------------
+            # =============================================
             # High / Low
-            # ---------------------------------------------
+            # =============================================
 
             high = float(
                 candle["high"]
@@ -565,9 +569,9 @@ def update_trades(df):
                 f"Low: {low}"
             )
 
-            # ---------------------------------------------
+            # =============================================
             # ذخیره کندل
-            # ---------------------------------------------
+            # =============================================
 
             trade.setdefault(
                 "candles",
@@ -605,7 +609,9 @@ def update_trades(df):
                 # SL
                 # -----------------------------------------
 
-                if low <= trade["sl"]:
+                if low <= float(
+                    trade["sl"]
+                ):
 
                     if trade["tp1_hit"]:
 
@@ -642,7 +648,8 @@ def update_trades(df):
                     print(
                         f"🔴 Signal #{signal_id} "
                         f"SL HIT | "
-                        f"Low={low} "
+                        f"Candle={candle_time} | "
+                        f"Low={low} | "
                         f"SL={trade['sl']}"
                     )
 
@@ -654,7 +661,9 @@ def update_trades(df):
                 # TP2
                 # -----------------------------------------
 
-                if high >= trade["tp2"]:
+                if high >= float(
+                    trade["tp2"]
+                ):
 
                     save_result(
                         trade,
@@ -681,7 +690,8 @@ def update_trades(df):
                     print(
                         f"🏆 Signal #{signal_id} "
                         f"TP2 HIT | "
-                        f"High={high} "
+                        f"Candle={candle_time} | "
+                        f"High={high} | "
                         f"TP2={trade['tp2']}"
                     )
 
@@ -693,7 +703,9 @@ def update_trades(df):
                 # TP1
                 # -----------------------------------------
 
-                if high >= trade["tp1"]:
+                if high >= float(
+                    trade["tp1"]
+                ):
 
                     if not trade[
                         "tp1_hit"
@@ -721,7 +733,8 @@ def update_trades(df):
                         print(
                             f"🟢 Signal #{signal_id} "
                             f"TP1 HIT | "
-                            f"High={high} "
+                            f"Candle={candle_time} | "
+                            f"High={high} | "
                             f"TP1={trade['tp1']}"
                         )
 
@@ -735,7 +748,9 @@ def update_trades(df):
                 # SL
                 # -----------------------------------------
 
-                if high >= trade["sl"]:
+                if high >= float(
+                    trade["sl"]
+                ):
 
                     if trade["tp1_hit"]:
 
@@ -772,7 +787,8 @@ def update_trades(df):
                     print(
                         f"🔴 Signal #{signal_id} "
                         f"SL HIT | "
-                        f"High={high} "
+                        f"Candle={candle_time} | "
+                        f"High={high} | "
                         f"SL={trade['sl']}"
                     )
 
@@ -784,7 +800,9 @@ def update_trades(df):
                 # TP2
                 # -----------------------------------------
 
-                if low <= trade["tp2"]:
+                if low <= float(
+                    trade["tp2"]
+                ):
 
                     save_result(
                         trade,
@@ -811,7 +829,8 @@ def update_trades(df):
                     print(
                         f"🏆 Signal #{signal_id} "
                         f"TP2 HIT | "
-                        f"Low={low} "
+                        f"Candle={candle_time} | "
+                        f"Low={low} | "
                         f"TP2={trade['tp2']}"
                     )
 
@@ -823,7 +842,9 @@ def update_trades(df):
                 # TP1
                 # -----------------------------------------
 
-                if low <= trade["tp1"]:
+                if low <= float(
+                    trade["tp1"]
+                ):
 
                     if not trade[
                         "tp1_hit"
@@ -851,12 +872,13 @@ def update_trades(df):
                         print(
                             f"🟢 Signal #{signal_id} "
                             f"TP1 HIT | "
-                            f"Low={low} "
+                            f"Candle={candle_time} | "
+                            f"Low={low} | "
                             f"TP1={trade['tp1']}"
                         )
 
         # -------------------------------------------------
-        # اگر معامله بسته نشده، نگه دار
+        # معامله هنوز باز است
         # -------------------------------------------------
 
         if not trade_closed:
@@ -866,7 +888,7 @@ def update_trades(df):
             )
 
     # -----------------------------------------------------
-    # ذخیره معاملات باز
+    # ذخیره
     # -----------------------------------------------------
 
     save_open_trades(
@@ -884,6 +906,4 @@ def pd_to_datetime(value):
 
     from pandas import to_datetime
 
-    return to_datetime(
-        value
-    )
+    return to_datetime(value)
