@@ -11,7 +11,7 @@ from trade_tracker import add_trade, update_trades
 def format_market_message(result):
 
     signal = result.get("signal", "NO SIGNAL")
-    signal_id = result.get("signal_id", "000")
+signal_id = result.get("signal_id", "000")
 
     if signal == "BUY":
         title = "🟢 BUY SIGNAL"
