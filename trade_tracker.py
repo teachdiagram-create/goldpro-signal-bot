@@ -1,28 +1,66 @@
 import json
 import csv
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 OPEN_FILE = "open_trades.json"
 RESULT_FILE = "trade_results.csv"
 
+# =========================
+# Signal Protection Settings
+# =========================
+
+# بعد از SL چند دقیقه صبر کنیم
+SL_COOLDOWN_MINUTES = 30
+
+# حداقل فاصله قیمت برای سیگنال جدید
+MIN_SIGNAL_DISTANCE = 5.0
+
+
+# =========================
+# Open Trades
+# =========================
 
 def load_open_trades():
+
     if not os.path.exists(OPEN_FILE):
         return []
 
     try:
-        with open(OPEN_FILE, "r", encoding="utf-8") as file:
+
+        with open(
+            OPEN_FILE,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
             return json.load(file)
+
     except Exception:
+
         return []
 
 
 def save_open_trades(trades):
-    with open(OPEN_FILE, "w", encoding="utf-8") as file:
-        json.dump(trades, file, indent=2, ensure_ascii=False)
 
+    with open(
+        OPEN_FILE,
+        "w",
+        encoding="utf-8"
+    ) as file:
+
+        json.dump(
+            trades,
+            file,
+            indent=2,
+            ensure_ascii=False
+        )
+
+
+# =========================
+# Save Trade Result
+# =========================
 
 def save_result(trade, outcome, exit_price):
 
@@ -38,6 +76,7 @@ def save_result(trade, outcome, exit_price):
         writer = csv.writer(file)
 
         if not file_exists:
+
             writer.writerow([
                 "time",
                 "signal",
@@ -52,7 +91,9 @@ def save_result(trade, outcome, exit_price):
             ])
 
         writer.writerow([
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
             trade["signal"],
             trade["entry"],
             trade["tp1"],
@@ -65,6 +106,150 @@ def save_result(trade, outcome, exit_price):
         ])
 
 
+# =========================
+# Check SL Cooldown
+# =========================
+
+def is_in_sl_cooldown():
+
+    if not os.path.exists(RESULT_FILE):
+        return False
+
+    try:
+
+        with open(
+            RESULT_FILE,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
+            rows = list(
+                csv.DictReader(file)
+            )
+
+        if not rows:
+            return False
+
+        # آخرین معامله
+        last_trade = rows[-1]
+
+        outcome = last_trade.get(
+            "outcome",
+            ""
+        )
+
+        # فقط نتایجی که با SL بسته شده‌اند
+        if outcome not in [
+            "LOSS",
+            "PARTIAL WIN"
+        ]:
+            return False
+
+        time_text = last_trade.get(
+            "time",
+            ""
+        )
+
+        if not time_text:
+            return False
+
+        last_time = datetime.strptime(
+            time_text,
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+        elapsed = datetime.now() - last_time
+
+        cooldown = timedelta(
+            minutes=SL_COOLDOWN_MINUTES
+        )
+
+        if elapsed < cooldown:
+
+            remaining = cooldown - elapsed
+
+            minutes = int(
+                remaining.total_seconds() / 60
+            )
+
+            print(
+                f"SL cooldown active - "
+                f"{minutes} minutes remaining"
+            )
+
+            return True
+
+        return False
+
+    except Exception as e:
+
+        print(
+            "Cooldown check error:",
+            e
+        )
+
+        return False
+
+
+# =========================
+# Check Recent Signal Distance
+# =========================
+
+def is_price_too_close(new_entry):
+
+    if not os.path.exists(RESULT_FILE):
+        return False
+
+    try:
+
+        with open(
+            RESULT_FILE,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
+            rows = list(
+                csv.DictReader(file)
+            )
+
+        if not rows:
+            return False
+
+        last_trade = rows[-1]
+
+        last_entry = float(
+            last_trade["entry"]
+        )
+
+        distance = abs(
+            new_entry - last_entry
+        )
+
+        if distance < MIN_SIGNAL_DISTANCE:
+
+            print(
+                f"Signal too close - "
+                f"distance: {distance:.2f}"
+            )
+
+            return True
+
+        return False
+
+    except Exception as e:
+
+        print(
+            "Price distance check error:",
+            e
+        )
+
+        return False
+
+
+# =========================
+# Add New Trade
+# =========================
+
 def add_trade(result):
 
     if result["signal"] == "NO SIGNAL":
@@ -73,44 +258,136 @@ def add_trade(result):
     trades = load_open_trades()
 
     new_signal = result["signal"]
-    new_entry = float(result["price"])
 
-    # جلوگیری از ثبت سیگنال تکراری
+    new_entry = float(
+        result["price"]
+    )
+
+
+    # =========================
+    # 1. Only one open trade
+    # =========================
+
+    if len(trades) > 0:
+
+        print(
+            "Open trade already exists - "
+            "new signal ignored"
+        )
+
+        return False
+
+
+    # =========================
+    # 2. SL Cooldown
+    # =========================
+
+    if is_in_sl_cooldown():
+
+        print(
+            "SL cooldown active - "
+            "new signal ignored"
+        )
+
+        return False
+
+
+    # =========================
+    # 3. Price Distance
+    # =========================
+
+    if is_price_too_close(new_entry):
+
+        print(
+            "Signal price too close - "
+            "new signal ignored"
+        )
+
+        return False
+
+
+    # =========================
+    # 4. Duplicate Protection
+    # =========================
+
     for trade in trades:
 
-        same_signal = trade.get("signal") == new_signal
+        same_signal = (
+            trade.get("signal")
+            == new_signal
+        )
 
         same_entry = abs(
-            float(trade.get("entry", 0)) - new_entry
+            float(
+                trade.get("entry", 0)
+            ) - new_entry
         ) < 0.01
 
         if same_signal and same_entry:
 
-            print("Duplicate signal ignored")
+            print(
+                "Duplicate signal ignored"
+            )
+
             return False
 
 
+    # =========================
+    # Create Trade
+    # =========================
+
     trade = {
-        "id": datetime.now().strftime("%Y%m%d%H%M%S"),
-        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+
+        "id": datetime.now().strftime(
+            "%Y%m%d%H%M%S"
+        ),
+
+        "time": datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
+
         "signal": new_signal,
+
         "entry": new_entry,
-        "tp1": float(result["tp1"]),
-        "tp2": float(result["tp2"]),
-        "sl": float(result["sl"]),
-        "confidence": result["confidence"],
-        "quality": result["quality"],
+
+        "tp1": float(
+            result["tp1"]
+        ),
+
+        "tp2": float(
+            result["tp2"]
+        ),
+
+        "sl": float(
+            result["sl"]
+        ),
+
+        "confidence": result[
+            "confidence"
+        ],
+
+        "quality": result[
+            "quality"
+        ],
+
         "tp1_hit": False
     }
+
 
     trades.append(trade)
 
     save_open_trades(trades)
 
-    print("Trade tracker: trade added")
+    print(
+        "Trade tracker: trade added"
+    )
 
     return True
 
+
+# =========================
+# Update Open Trades
+# =========================
 
 def update_trades(df):
 
@@ -121,15 +398,23 @@ def update_trades(df):
 
     latest = df.iloc[-1]
 
-    high = float(latest["high"])
-    low = float(latest["low"])
+    high = float(
+        latest["high"]
+    )
+
+    low = float(
+        latest["low"]
+    )
 
     remaining = []
+
     results = []
+
 
     for trade in trades:
 
         signal = trade["signal"]
+
 
         # =========================
         # BUY
@@ -137,13 +422,20 @@ def update_trades(df):
 
         if signal == "BUY":
 
+            # -------------------------
             # SL
+            # -------------------------
+
             if low <= trade["sl"]:
 
                 if trade["tp1_hit"]:
+
                     outcome = "PARTIAL WIN"
+
                 else:
+
                     outcome = "LOSS"
+
 
                 save_result(
                     trade,
@@ -151,15 +443,24 @@ def update_trades(df):
                     trade["sl"]
                 )
 
+
                 results.append({
+
                     "signal": signal,
+
                     "outcome": outcome,
+
                     "price": trade["sl"]
                 })
 
+
                 continue
 
+
+            # -------------------------
             # TP2
+            # -------------------------
+
             if high >= trade["tp2"]:
 
                 save_result(
@@ -168,26 +469,40 @@ def update_trades(df):
                     trade["tp2"]
                 )
 
+
                 results.append({
+
                     "signal": signal,
+
                     "outcome": "WIN",
+
                     "price": trade["tp2"]
                 })
 
+
                 continue
 
+
+            # -------------------------
             # TP1
+            # -------------------------
+
             if high >= trade["tp1"]:
 
                 if not trade["tp1_hit"]:
 
                     trade["tp1_hit"] = True
 
+
                     results.append({
+
                         "signal": signal,
+
                         "outcome": "TP1 HIT",
+
                         "price": trade["tp1"]
                     })
+
 
         # =========================
         # SELL
@@ -195,13 +510,20 @@ def update_trades(df):
 
         elif signal == "SELL":
 
+            # -------------------------
             # SL
+            # -------------------------
+
             if high >= trade["sl"]:
 
                 if trade["tp1_hit"]:
+
                     outcome = "PARTIAL WIN"
+
                 else:
+
                     outcome = "LOSS"
+
 
                 save_result(
                     trade,
@@ -209,15 +531,24 @@ def update_trades(df):
                     trade["sl"]
                 )
 
+
                 results.append({
+
                     "signal": signal,
+
                     "outcome": outcome,
+
                     "price": trade["sl"]
                 })
 
+
                 continue
 
+
+            # -------------------------
             # TP2
+            # -------------------------
+
             if low <= trade["tp2"]:
 
                 save_result(
@@ -226,28 +557,43 @@ def update_trades(df):
                     trade["tp2"]
                 )
 
+
                 results.append({
+
                     "signal": signal,
+
                     "outcome": "WIN",
+
                     "price": trade["tp2"]
                 })
 
+
                 continue
 
+
+            # -------------------------
             # TP1
+            # -------------------------
+
             if low <= trade["tp1"]:
 
                 if not trade["tp1_hit"]:
 
                     trade["tp1_hit"] = True
 
+
                     results.append({
+
                         "signal": signal,
+
                         "outcome": "TP1 HIT",
+
                         "price": trade["tp1"]
                     })
 
+
         remaining.append(trade)
+
 
     save_open_trades(remaining)
 
