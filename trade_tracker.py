@@ -316,11 +316,13 @@ def add_trade(result):
     save_open_trades(trades)
 
     print(
-        f"Trade tracker: "
-        f"Signal #{signal_id} added"
-    )
+    f"Trade tracker: "
+    f"Signal #{signal_id} added"
+)
 
-    return True
+result["signal_id"] = signal_id
+
+return True
 
 
 def update_trades(df):
