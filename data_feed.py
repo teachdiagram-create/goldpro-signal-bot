@@ -1,13 +1,21 @@
 import requests
 import pandas as pd
 
-from config import TWELVE_DATA_API_KEY, SYMBOL, TIMEFRAME, CANDLE_LIMIT
+from config import (
+    TWELVE_DATA_API_KEY,
+    SYMBOL,
+    TIMEFRAME,
+    CANDLE_LIMIT
+)
 
 
 def get_gold_data():
 
     if not TWELVE_DATA_API_KEY:
-        print("API error: TWELVE_DATA_API_KEY is missing")
+        print(
+            "API error: "
+            "TWELVE_DATA_API_KEY is missing"
+        )
         return None
 
     url = "https://api.twelvedata.com/time_series"
@@ -20,44 +28,138 @@ def get_gold_data():
     }
 
     try:
-        response = requests.get(url, params=params, timeout=30)
+
+        response = requests.get(
+            url,
+            params=params,
+            timeout=30
+        )
 
         data = response.json()
 
-        if "status" in data and data["status"] == "error":
-            print("API error:", data)
+        if (
+            data.get("status")
+            == "error"
+        ):
+
+            print(
+                "API error:",
+                data
+            )
+
             return None
 
         if "values" not in data:
-            print("Data error:", data)
+
+            print(
+                "Data error:",
+                data
+            )
+
             return None
 
-        df = pd.DataFrame(data["values"])
+        df = pd.DataFrame(
+            data["values"]
+        )
 
-        df["datetime"] = pd.to_datetime(df["datetime"])
+        # -------------------------------------------------
+        # Convert datetime
+        # -------------------------------------------------
 
-        for column in ["open", "high", "low", "close"]:
-            df[column] = pd.to_numeric(df[column], errors="coerce")
+        df["datetime"] = pd.to_datetime(
+            df["datetime"],
+            errors="coerce"
+        )
+
+        # -------------------------------------------------
+        # Convert OHLC
+        # -------------------------------------------------
+
+        for column in [
+            "open",
+            "high",
+            "low",
+            "close"
+        ]:
+
+            df[column] = pd.to_numeric(
+                df[column],
+                errors="coerce"
+            )
 
         if "volume" in df.columns:
+
             df["volume"] = pd.to_numeric(
                 df["volume"],
                 errors="coerce"
             )
 
-        df = df.sort_values("datetime").reset_index(drop=True)
+        # -------------------------------------------------
+        # Remove invalid rows
+        # -------------------------------------------------
+
+        df = df.dropna(
+            subset=[
+                "datetime",
+                "open",
+                "high",
+                "low",
+                "close"
+            ]
+        )
+
+        # -------------------------------------------------
+        # Sort oldest → newest
+        # -------------------------------------------------
+
+        df = df.sort_values(
+            "datetime"
+        ).reset_index(
+            drop=True
+        )
+
+        # -------------------------------------------------
+        # Rename datetime → time
+        # -------------------------------------------------
 
         df.rename(
-            columns={"datetime": "time"},
+            columns={
+                "datetime": "time"
+            },
             inplace=True
+        )
+
+        # -------------------------------------------------
+        # IMPORTANT
+        # Keep candle time exactly as received
+        # -------------------------------------------------
+
+        print(
+            "Latest candle:",
+            df.iloc[-1]["time"]
+        )
+
+        print(
+            "Latest candle close:",
+            df.iloc[-1]["close"]
         )
 
         return df
 
     except requests.RequestException as e:
-        print("Connection error:", e)
+
+        print(
+            "Connection error:",
+            e
+        )
+
         return None
 
     except Exception as e:
-        print("Data error:", e)
+
+        print(
+            "Data error:",
+            e
+        )
+
         return None
