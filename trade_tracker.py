@@ -14,7 +14,7 @@ MIN_SIGNAL_DISTANCE = 5.0
 
 
 # =========================================================
-# LOAD OPEN TRADES
+# Load / Save
 # =========================================================
 
 def load_open_trades():
@@ -39,114 +39,114 @@ def load_open_trades():
 
     except Exception as e:
 
-        print("Open trades load error:", e)
+        print(
+            "Open trades read error:",
+            e
+        )
 
         return []
 
 
-# =========================================================
-# SAVE OPEN TRADES
-# =========================================================
-
 def save_open_trades(trades):
 
-    try:
+    with open(
+        OPEN_FILE,
+        "w",
+        encoding="utf-8"
+    ) as file:
 
-        with open(
-            OPEN_FILE,
-            "w",
-            encoding="utf-8"
-        ) as file:
-
-            json.dump(
-                trades,
-                file,
-                indent=2,
-                ensure_ascii=False
-            )
-
-    except Exception as e:
-
-        print("Open trades save error:", e)
+        json.dump(
+            trades,
+            file,
+            indent=2,
+            ensure_ascii=False
+        )
 
 
 # =========================================================
-# SAVE RESULT
+# Save result
 # =========================================================
 
-def save_result(trade, outcome, exit_price):
+def save_result(
+    trade,
+    outcome,
+    exit_price,
+    candle_time=None
+):
 
-    file_exists = os.path.exists(RESULT_FILE)
+    file_exists = os.path.exists(
+        RESULT_FILE
+    )
 
-    try:
+    with open(
+        RESULT_FILE,
+        "a",
+        newline="",
+        encoding="utf-8"
+    ) as file:
 
-        with open(
-            RESULT_FILE,
-            "a",
-            newline="",
-            encoding="utf-8"
-        ) as file:
+        writer = csv.writer(file)
 
-            writer = csv.writer(file)
-
-            if not file_exists:
-
-                writer.writerow([
-                    "time",
-                    "signal_id",
-                    "signal",
-                    "entry",
-                    "tp1",
-                    "tp2",
-                    "sl",
-                    "exit_price",
-                    "outcome",
-                    "confidence",
-                    "quality"
-                ])
+        if not file_exists:
 
             writer.writerow([
-
-                datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
-
-                trade.get(
-                    "signal_id",
-                    "000"
-                ),
-
-                trade["signal"],
-
-                trade["entry"],
-
-                trade["tp1"],
-
-                trade["tp2"],
-
-                trade["sl"],
-
-                exit_price,
-
-                outcome,
-
-                trade["confidence"],
-
-                trade["quality"]
+                "time",
+                "signal_id",
+                "signal",
+                "entry",
+                "tp1",
+                "tp2",
+                "sl",
+                "exit_price",
+                "outcome",
+                "confidence",
+                "quality",
+                "exit_candle"
             ])
 
-    except Exception as e:
+        writer.writerow([
 
-        print("Result save error:", e)
+            datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+
+            trade.get(
+                "signal_id",
+                "000"
+            ),
+
+            trade["signal"],
+
+            trade["entry"],
+
+            trade["tp1"],
+
+            trade["tp2"],
+
+            trade["sl"],
+
+            exit_price,
+
+            outcome,
+
+            trade["confidence"],
+
+            trade["quality"],
+
+            candle_time or ""
+        ])
 
 
 # =========================================================
-# SL COOLDOWN
+# SL Cooldown
 # =========================================================
 
 def is_in_sl_cooldown():
 
-    if not os.path.exists(RESULT_FILE):
+    if not os.path.exists(
+        RESULT_FILE
+    ):
+
         return False
 
     try:
@@ -192,7 +192,8 @@ def is_in_sl_cooldown():
         )
 
         elapsed = (
-            datetime.now() - last_time
+            datetime.now()
+            - last_time
         )
 
         cooldown = timedelta(
@@ -202,7 +203,8 @@ def is_in_sl_cooldown():
         if elapsed < cooldown:
 
             remaining = (
-                cooldown - elapsed
+                cooldown
+                - elapsed
             )
 
             minutes = int(
@@ -230,12 +232,17 @@ def is_in_sl_cooldown():
 
 
 # =========================================================
-# PRICE DISTANCE
+# Price distance
 # =========================================================
 
-def is_price_too_close(new_entry):
+def is_price_too_close(
+    new_entry
+):
 
-    if not os.path.exists(RESULT_FILE):
+    if not os.path.exists(
+        RESULT_FILE
+    ):
+
         return False
 
     try:
@@ -260,7 +267,8 @@ def is_price_too_close(new_entry):
         )
 
         distance = abs(
-            new_entry - last_entry
+            new_entry
+            - last_entry
         )
 
         if distance < MIN_SIGNAL_DISTANCE:
@@ -285,20 +293,22 @@ def is_price_too_close(new_entry):
 
 
 # =========================================================
-# ADD NEW TRADE
+# Add trade
 # =========================================================
 
 def add_trade(result):
 
-    signal = result.get(
-        "signal",
+    if result.get("signal") in [
+        None,
+        "",
         "NO SIGNAL"
-    )
+    ]:
 
-    if signal == "NO SIGNAL":
         return False
 
     trades = load_open_trades()
+
+    new_signal = result["signal"]
 
     new_entry = float(
         result["price"]
@@ -331,7 +341,7 @@ def add_trade(result):
         return False
 
     # -----------------------------------------------------
-    # فاصله قیمتی
+    # فاصله قیمت
     # -----------------------------------------------------
 
     if is_price_too_close(
@@ -351,6 +361,18 @@ def add_trade(result):
 
     signal_id = get_next_signal_id()
 
+    # -----------------------------------------------------
+    # زمان ثبت سیگنال
+    # -----------------------------------------------------
+
+    signal_time = datetime.now().strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+
+    # -----------------------------------------------------
+    # Trade
+    # -----------------------------------------------------
+
     trade = {
 
         "id": datetime.now().strftime(
@@ -359,11 +381,9 @@ def add_trade(result):
 
         "signal_id": signal_id,
 
-        "time": datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),
+        "time": signal_time,
 
-        "signal": signal,
+        "signal": new_signal,
 
         "entry": new_entry,
 
@@ -379,18 +399,26 @@ def add_trade(result):
             result["sl"]
         ),
 
-        "confidence": result.get(
-            "confidence",
-            0
-        ),
+        "confidence": result[
+            "confidence"
+        ],
 
-        "quality": result.get(
-            "quality",
-            "UNKNOWN"
-        ),
+        "quality": result[
+            "quality"
+        ],
 
-        "tp1_hit": False
+        "tp1_hit": False,
+
+        # زمان آخرین کندل بررسی‌شده
+        "last_candle_time": None,
+
+        # ذخیره کندل‌ها
+        "candles": []
     }
+
+    # -----------------------------------------------------
+    # ذخیره
+    # -----------------------------------------------------
 
     trades.append(trade)
 
@@ -398,7 +426,7 @@ def add_trade(result):
         trades
     )
 
-    # شماره سیگنال برای main.py
+    # برگرداندن ID به main.py
     result["signal_id"] = signal_id
 
     print(
@@ -406,18 +434,11 @@ def add_trade(result):
         f"Signal #{signal_id} added"
     )
 
-    print(
-        f"Entry={trade['entry']} | "
-        f"TP1={trade['tp1']} | "
-        f"TP2={trade['tp2']} | "
-        f"SL={trade['sl']}"
-    )
-
     return True
 
 
 # =========================================================
-# UPDATE OPEN TRADES
+# Update trades
 # =========================================================
 
 def update_trades(df):
@@ -427,8 +448,7 @@ def update_trades(df):
     if not trades:
 
         print(
-            "Trade tracker: "
-            "No open trades"
+            "Trade tracker: No open trades"
         )
 
         return []
@@ -436,129 +456,158 @@ def update_trades(df):
     if df is None or df.empty:
 
         print(
-            "Trade tracker: "
-            "No market data"
+            "Trade tracker: No candle data"
         )
 
         return []
-
-    print(
-        f"Trade tracker: "
-        f"{len(trades)} open trade(s)"
-    )
 
     results = []
 
     remaining = []
 
     # -----------------------------------------------------
-    # برای تشخیص قیمت، همه کندل‌های موجود را بررسی می‌کنیم
+    # بررسی تمام کندل‌ها
     # -----------------------------------------------------
-
-    candles = df.copy()
-
-    # اگر ستون زمان وجود داشته باشد،
-    # تلاش می‌کنیم آن را مرتب کنیم.
-    try:
-
-        if "time" in candles.columns:
-
-            candles["_tracker_time"] = (
-                candles["time"]
-                .astype(str)
-            )
-
-            candles = candles.sort_values(
-                "_tracker_time"
-            )
-
-    except Exception:
-
-        pass
-
-    # =====================================================
-    # بررسی هر معامله
-    # =====================================================
 
     for trade in trades:
 
-        signal = trade.get(
-            "signal"
-        )
+        signal = trade["signal"]
 
         signal_id = trade.get(
             "signal_id",
             "000"
         )
 
-        entry = float(
-            trade["entry"]
+        entry_time = trade.get(
+            "time"
         )
 
-        tp1 = float(
-            trade["tp1"]
-        )
-
-        tp2 = float(
-            trade["tp2"]
-        )
-
-        sl = float(
-            trade["sl"]
-        )
-
-        tp1_hit = bool(
-            trade.get(
-                "tp1_hit",
-                False
-            )
-        )
-
-        print(
-            f"Checking Signal #{signal_id} | "
-            f"{signal} | "
-            f"Entry={entry} | "
-            f"TP1={tp1} | "
-            f"TP2={tp2} | "
-            f"SL={sl}"
+        last_candle_time = trade.get(
+            "last_candle_time"
         )
 
         trade_closed = False
-        tp1_reported_now = False
 
         # -------------------------------------------------
-        # کندل‌ها را بررسی می‌کنیم
+        # بررسی کندل‌ها
         # -------------------------------------------------
 
-        for _, candle in candles.iterrows():
+        for _, candle in df.iterrows():
 
-            try:
+            candle_time = str(
+                candle["time"]
+            )
 
-                high = float(
-                    candle["high"]
+            # ---------------------------------------------
+            # کندل‌های قبل از معامله را رد کن
+            # ---------------------------------------------
+
+            if entry_time:
+
+                try:
+
+                    candle_dt = pd_to_datetime(
+                        candle_time
+                    )
+
+                    entry_dt = pd_to_datetime(
+                        entry_time
+                    )
+
+                    if candle_dt < entry_dt:
+
+                        continue
+
+                except Exception:
+
+                    pass
+
+            # ---------------------------------------------
+            # کندل بررسی‌شده قبلی
+            # ---------------------------------------------
+
+            if last_candle_time:
+
+                try:
+
+                    candle_dt = pd_to_datetime(
+                        candle_time
+                    )
+
+                    last_dt = pd_to_datetime(
+                        last_candle_time
+                    )
+
+                    if candle_dt <= last_dt:
+
+                        continue
+
+                except Exception:
+
+                    pass
+
+            # ---------------------------------------------
+            # High / Low
+            # ---------------------------------------------
+
+            high = float(
+                candle["high"]
+            )
+
+            low = float(
+                candle["low"]
+            )
+
+            print(
+                f"🔎 Signal #{signal_id} | "
+                f"Candle: {candle_time} | "
+                f"High: {high} | "
+                f"Low: {low}"
+            )
+
+            # ---------------------------------------------
+            # ذخیره کندل
+            # ---------------------------------------------
+
+            trade.setdefault(
+                "candles",
+                []
+            )
+
+            trade["candles"].append({
+
+                "time": candle_time,
+
+                "open": float(
+                    candle["open"]
+                ),
+
+                "high": high,
+
+                "low": low,
+
+                "close": float(
+                    candle["close"]
                 )
+            })
 
-                low = float(
-                    candle["low"]
-                )
+            trade[
+                "last_candle_time"
+            ] = candle_time
 
-            except Exception:
-
-                continue
-
-            # =================================================
+            # =============================================
             # BUY
-            # =================================================
+            # =============================================
 
             if signal == "BUY":
 
-                # -------------------------------------------------
+                # -----------------------------------------
                 # SL
-                # -------------------------------------------------
+                # -----------------------------------------
 
-                if low <= sl:
+                if low <= trade["sl"]:
 
-                    if tp1_hit:
+                    if trade["tp1_hit"]:
 
                         outcome = (
                             "PARTIAL WIN"
@@ -568,16 +617,11 @@ def update_trades(df):
 
                         outcome = "LOSS"
 
-                    print(
-                        f"🔴 SL DETECTED | "
-                        f"Signal #{signal_id} | "
-                        f"Low={low} <= SL={sl}"
-                    )
-
                     save_result(
                         trade,
                         outcome,
-                        sl
+                        trade["sl"],
+                        candle_time
                     )
 
                     results.append({
@@ -592,29 +636,31 @@ def update_trades(df):
                             outcome,
 
                         "price":
-                            sl
+                            trade["sl"]
                     })
+
+                    print(
+                        f"🔴 Signal #{signal_id} "
+                        f"SL HIT | "
+                        f"Low={low} "
+                        f"SL={trade['sl']}"
+                    )
 
                     trade_closed = True
 
                     break
 
-                # -------------------------------------------------
+                # -----------------------------------------
                 # TP2
-                # -------------------------------------------------
+                # -----------------------------------------
 
-                if high >= tp2:
-
-                    print(
-                        f"🏆 TP2 DETECTED | "
-                        f"Signal #{signal_id} | "
-                        f"High={high} >= TP2={tp2}"
-                    )
+                if high >= trade["tp2"]:
 
                     save_result(
                         trade,
                         "WIN",
-                        tp2
+                        trade["tp2"],
+                        candle_time
                     )
 
                     results.append({
@@ -629,32 +675,33 @@ def update_trades(df):
                             "WIN",
 
                         "price":
-                            tp2
+                            trade["tp2"]
                     })
+
+                    print(
+                        f"🏆 Signal #{signal_id} "
+                        f"TP2 HIT | "
+                        f"High={high} "
+                        f"TP2={trade['tp2']}"
+                    )
 
                     trade_closed = True
 
                     break
 
-                # -------------------------------------------------
+                # -----------------------------------------
                 # TP1
-                # -------------------------------------------------
+                # -----------------------------------------
 
-                if high >= tp1:
+                if high >= trade["tp1"]:
 
-                    if not tp1_hit:
+                    if not trade[
+                        "tp1_hit"
+                    ]:
 
-                        tp1_hit = True
-
-                        trade["tp1_hit"] = True
-
-                        tp1_reported_now = True
-
-                        print(
-                            f"🟢 TP1 DETECTED | "
-                            f"Signal #{signal_id} | "
-                            f"High={high} >= TP1={tp1}"
-                        )
+                        trade[
+                            "tp1_hit"
+                        ] = True
 
                         results.append({
 
@@ -668,22 +715,29 @@ def update_trades(df):
                                 "TP1 HIT",
 
                             "price":
-                                tp1
+                                trade["tp1"]
                         })
 
-            # =================================================
+                        print(
+                            f"🟢 Signal #{signal_id} "
+                            f"TP1 HIT | "
+                            f"High={high} "
+                            f"TP1={trade['tp1']}"
+                        )
+
+            # =============================================
             # SELL
-            # =================================================
+            # =============================================
 
             elif signal == "SELL":
 
-                # -------------------------------------------------
+                # -----------------------------------------
                 # SL
-                # -------------------------------------------------
+                # -----------------------------------------
 
-                if high >= sl:
+                if high >= trade["sl"]:
 
-                    if tp1_hit:
+                    if trade["tp1_hit"]:
 
                         outcome = (
                             "PARTIAL WIN"
@@ -693,16 +747,11 @@ def update_trades(df):
 
                         outcome = "LOSS"
 
-                    print(
-                        f"🔴 SL DETECTED | "
-                        f"Signal #{signal_id} | "
-                        f"High={high} >= SL={sl}"
-                    )
-
                     save_result(
                         trade,
                         outcome,
-                        sl
+                        trade["sl"],
+                        candle_time
                     )
 
                     results.append({
@@ -717,29 +766,31 @@ def update_trades(df):
                             outcome,
 
                         "price":
-                            sl
+                            trade["sl"]
                     })
+
+                    print(
+                        f"🔴 Signal #{signal_id} "
+                        f"SL HIT | "
+                        f"High={high} "
+                        f"SL={trade['sl']}"
+                    )
 
                     trade_closed = True
 
                     break
 
-                # -------------------------------------------------
+                # -----------------------------------------
                 # TP2
-                # -------------------------------------------------
+                # -----------------------------------------
 
-                if low <= tp2:
-
-                    print(
-                        f"🏆 TP2 DETECTED | "
-                        f"Signal #{signal_id} | "
-                        f"Low={low} <= TP2={tp2}"
-                    )
+                if low <= trade["tp2"]:
 
                     save_result(
                         trade,
                         "WIN",
-                        tp2
+                        trade["tp2"],
+                        candle_time
                     )
 
                     results.append({
@@ -754,32 +805,33 @@ def update_trades(df):
                             "WIN",
 
                         "price":
-                            tp2
+                            trade["tp2"]
                     })
+
+                    print(
+                        f"🏆 Signal #{signal_id} "
+                        f"TP2 HIT | "
+                        f"Low={low} "
+                        f"TP2={trade['tp2']}"
+                    )
 
                     trade_closed = True
 
                     break
 
-                # -------------------------------------------------
+                # -----------------------------------------
                 # TP1
-                # -------------------------------------------------
+                # -----------------------------------------
 
-                if low <= tp1:
+                if low <= trade["tp1"]:
 
-                    if not tp1_hit:
+                    if not trade[
+                        "tp1_hit"
+                    ]:
 
-                        tp1_hit = True
-
-                        trade["tp1_hit"] = True
-
-                        tp1_reported_now = True
-
-                        print(
-                            f"🟢 TP1 DETECTED | "
-                            f"Signal #{signal_id} | "
-                            f"Low={low} <= TP1={tp1}"
-                        )
+                        trade[
+                            "tp1_hit"
+                        ] = True
 
                         results.append({
 
@@ -793,32 +845,45 @@ def update_trades(df):
                                 "TP1 HIT",
 
                             "price":
-                                tp1
+                                trade["tp1"]
                         })
 
-        # -----------------------------------------------------
-        # اگر معامله بسته نشده، نگهش می‌داریم
-        # -----------------------------------------------------
+                        print(
+                            f"🟢 Signal #{signal_id} "
+                            f"TP1 HIT | "
+                            f"Low={low} "
+                            f"TP1={trade['tp1']}"
+                        )
+
+        # -------------------------------------------------
+        # اگر معامله بسته نشده، نگه دار
+        # -------------------------------------------------
 
         if not trade_closed:
-
-            trade["tp1_hit"] = tp1_hit
 
             remaining.append(
                 trade
             )
 
-    # =========================================================
+    # -----------------------------------------------------
     # ذخیره معاملات باز
-    # =========================================================
+    # -----------------------------------------------------
 
     save_open_trades(
         remaining
     )
 
-    print(
-        f"Trade tracker: "
-        f"{len(remaining)} trade(s) remaining"
-    )
-
     return results
+
+
+# =========================================================
+# Date helper
+# =========================================================
+
+def pd_to_datetime(value):
+
+    from pandas import to_datetime
+
+    return to_datetime(
+        value
+    )
