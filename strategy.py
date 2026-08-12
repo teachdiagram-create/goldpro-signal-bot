@@ -1,10 +1,30 @@
 from config import MIN_ADX
 
 
+# =========================================================
+# تنظیمات استراتژی Pullback
+# =========================================================
+
+RSI_BUY_MIN = 40
+RSI_BUY_MAX = 65
+
+RSI_SELL_MIN = 35
+RSI_SELL_MAX = 60
+
+PULLBACK_LOOKBACK = 3
+
+# حداکثر فاصله قیمت از EMA20 بر اساس ATR
+MAX_EMA_DISTANCE_ATR = 1.0
+
+
+# =========================================================
+# Generate Signal
+# =========================================================
+
 def generate_signal(df):
 
-    # حداقل داده لازم
-    if df is None or len(df) < 3:
+    if df is None or len(df) < 5:
+
         return {
             "signal": "NO SIGNAL",
             "score": 0,
@@ -21,268 +41,295 @@ def generate_signal(df):
         }
 
     last = df.iloc[-1]
-    prev = df.iloc[-2]
 
     score = 0
     reasons = []
 
     price = float(last["close"])
     atr = float(last["ATR"])
-    rsi = float(last["RSI"])
-    adx = float(last["ADX"])
 
     ema20 = float(last["EMA20"])
     ema50 = float(last["EMA50"])
 
-    prev_ema20 = float(prev["EMA20"])
-    prev_ema50 = float(prev["EMA50"])
+    rsi = float(last["RSI"])
+    adx = float(last["ADX"])
 
     macd = float(last["MACD"])
     macd_signal = float(last["MACD_SIGNAL"])
 
-    prev_macd = float(prev["MACD"])
-    prev_macd_signal = float(prev["MACD_SIGNAL"])
-
-
     # =====================================================
-    # 1. روند EMA
+    # بررسی Pullback در 3 کندل اخیر
     # =====================================================
 
-    bullish_trend = ema20 > ema50
-    bearish_trend = ema20 < ema50
-
-    ema_bull_cross = (
-        prev_ema20 <= prev_ema50
-        and ema20 > ema50
+    recent = df.tail(
+        PULLBACK_LOOKBACK
     )
 
-    ema_bear_cross = (
-        prev_ema20 >= prev_ema50
-        and ema20 < ema50
+    pullback_buy = False
+    pullback_sell = False
+
+    # ---------------------------------------------
+    # BUY Pullback
+    # ---------------------------------------------
+
+    for _, candle in recent.iterrows():
+
+        candle_low = float(candle["low"])
+        candle_high = float(candle["high"])
+        candle_ema20 = float(candle["EMA20"])
+        candle_atr = float(candle["ATR"])
+
+        # قیمت در محدوده EMA20 قرار گرفته
+        if abs(
+            candle_low - candle_ema20
+        ) <= candle_atr * 0.7:
+
+            pullback_buy = True
+
+        # -----------------------------------------
+        # SELL Pullback
+        # -----------------------------------------
+
+        if abs(
+            candle_high - candle_ema20
+        ) <= candle_atr * 0.7:
+
+            pullback_sell = True
+
+
+    # =====================================================
+    # فاصله قیمت فعلی از EMA20
+    # =====================================================
+
+    ema_distance = abs(
+        price - ema20
     )
 
-
-    # =====================================================
-    # 2. MACD
-    # =====================================================
-
-    macd_bullish = macd > macd_signal
-    macd_bearish = macd < macd_signal
-
-    macd_bull_cross = (
-        prev_macd <= prev_macd_signal
-        and macd > macd_signal
-    )
-
-    macd_bear_cross = (
-        prev_macd >= prev_macd_signal
-        and macd < macd_signal
-    )
-
-
-    # =====================================================
-    # 3. RSI
-    # =====================================================
-
-    rsi_bullish_zone = 45 <= rsi < 70
-    rsi_bearish_zone = 30 < rsi <= 55
-
-
-    # =====================================================
-    # 4. فاصله قیمت از EMA20
-    #
-    # اگر قیمت خیلی از EMA20 دور شده باشد،
-    # احتمال ورود در انتهای حرکت بیشتر است.
-    # =====================================================
-
-    ema_distance = abs(price - ema20)
-
-    max_ema_distance = atr * 1.5
-
-    price_too_far_from_ema = (
-        ema_distance > max_ema_distance
+    price_near_ema = (
+        ema_distance
+        <= atr * MAX_EMA_DISTANCE_ATR
     )
 
 
     # =====================================================
-    # 5. شروع روند / پایان پولبک
+    # کندل فعلی
     # =====================================================
 
-    early_bullish = (
-        bullish_trend
-        and rsi_bullish_zone
-        and macd_bullish
-        and not price_too_far_from_ema
+    current_open = float(
+        last["open"]
     )
 
-    early_bearish = (
-        bearish_trend
-        and rsi_bearish_zone
-        and macd_bearish
-        and not price_too_far_from_ema
+    current_close = float(
+        last["close"]
+    )
+
+    current_high = float(
+        last["high"]
+    )
+
+    current_low = float(
+        last["low"]
+    )
+
+
+    current_bullish = (
+        current_close > current_open
+    )
+
+    current_bearish = (
+        current_close < current_open
     )
 
 
     # =====================================================
-    # امتیاز BUY
+    # کندل قبلی
     # =====================================================
 
-    if bullish_trend:
-        score += 20
-        reasons.append("EMA bullish")
+    previous = df.iloc[-2]
 
-    if ema_bull_cross:
-        score += 20
-        reasons.append("EMA bullish crossover")
+    previous_high = float(
+        previous["high"]
+    )
 
-
-    if macd_bullish:
-        score += 15
-        reasons.append("MACD bullish")
-
-    if macd_bull_cross:
-        score += 15
-        reasons.append("MACD bullish crossover")
-
-
-    if 45 <= rsi < 65:
-        score += 15
-        reasons.append("RSI healthy")
-
-    elif 65 <= rsi < 70:
-        score += 5
-        reasons.append("RSI high")
-
-
-    if adx >= MIN_ADX:
-        score += 10
-        reasons.append("Strong trend")
-
-
-    if price_too_far_from_ema:
-        score -= 25
-        reasons.append("Price extended from EMA")
+    previous_low = float(
+        previous["low"]
+    )
 
 
     # =====================================================
-    # امتیاز SELL
+    # BUY CONDITIONS
     # =====================================================
 
-    sell_score = 0
-    sell_reasons = []
+    buy_conditions = [
 
-    if bearish_trend:
-        sell_score += 20
-        sell_reasons.append("EMA bearish")
+        # روند صعودی
+        ema20 > ema50,
 
-    if ema_bear_cross:
-        sell_score += 20
-        sell_reasons.append(
-            "EMA bearish crossover"
-        )
+        # RSI سالم
+        RSI_BUY_MIN <= rsi <= RSI_BUY_MAX,
 
+        # MACD صعودی
+        macd > macd_signal,
 
-    if macd_bearish:
-        sell_score += 15
-        sell_reasons.append(
-            "MACD bearish"
-        )
+        # روند دارای قدرت
+        adx >= MIN_ADX,
 
-    if macd_bear_cross:
-        sell_score += 15
-        sell_reasons.append(
-            "MACD bearish crossover"
-        )
+        # پولبک اتفاق افتاده
+        pullback_buy,
 
+        # قیمت بیش از حد از EMA20 دور نشده
+        price_near_ema,
 
-    if 35 < rsi <= 55:
-        sell_score += 15
-        sell_reasons.append(
-            "RSI healthy"
-        )
+        # کندل فعلی صعودی
+        current_bullish,
 
-    elif 30 < rsi <= 35:
-        sell_score += 5
-        sell_reasons.append(
-            "RSI low"
-        )
-
-
-    if adx >= MIN_ADX:
-        sell_score += 10
-        sell_reasons.append(
-            "Strong trend"
-        )
-
-
-    if price_too_far_from_ema:
-        sell_score -= 25
-        sell_reasons.append(
-            "Price extended from EMA"
-        )
+        # برگشت مومنتوم
+        current_close > previous_high
+    ]
 
 
     # =====================================================
-    # قوانین مهم جلوگیری از ورود دیرهنگام
+    # SELL CONDITIONS
     # =====================================================
 
-    signal = "NO SIGNAL"
+    sell_conditions = [
 
-    # BUY ممنوع وقتی RSI >= 70
-    if rsi >= 70:
+        # روند نزولی
+        ema20 < ema50,
 
-        score = 0
+        # RSI سالم
+        RSI_SELL_MIN <= rsi <= RSI_SELL_MAX,
+
+        # MACD نزولی
+        macd < macd_signal,
+
+        # روند دارای قدرت
+        adx >= MIN_ADX,
+
+        # پولبک اتفاق افتاده
+        pullback_sell,
+
+        # قیمت بیش از حد از EMA20 دور نشده
+        price_near_ema,
+
+        # کندل فعلی نزولی
+        current_bearish,
+
+        # برگشت مومنتوم
+        current_close < previous_low
+    ]
+
+
+    # =====================================================
+    # BUY SCORE
+    # =====================================================
+
+    if all(buy_conditions):
+
+        score = 100
+
         reasons = [
-            "BUY blocked - RSI >= 70"
+
+            "EMA bullish",
+            "RSI healthy",
+            "MACD bullish",
+            "Strong trend",
+            "Pullback detected",
+            "Early momentum recovery"
         ]
-
-    # SELL ممنوع وقتی RSI <= 30
-    elif rsi <= 30:
-
-        sell_score = 0
-        sell_reasons = [
-            "SELL blocked - RSI <= 30"
-        ]
-
-
-    # BUY
-    if (
-        rsi < 70
-        and early_bullish
-        and score >= 55
-        and score > sell_score
-    ):
 
         signal = "BUY"
 
 
-    # SELL
-    elif (
-        rsi > 30
-        and early_bearish
-        and sell_score >= 55
-        and sell_score > score
-    ):
+    # =====================================================
+    # SELL SCORE
+    # =====================================================
+
+    elif all(sell_conditions):
+
+        score = -100
+
+        reasons = [
+
+            "EMA bearish",
+            "RSI healthy",
+            "MACD bearish",
+            "Strong trend",
+            "Pullback detected",
+            "Early momentum recovery"
+        ]
 
         signal = "SELL"
 
-        score = -sell_score
-        reasons = sell_reasons
 
+    # =====================================================
+    # NO SIGNAL
+    # =====================================================
 
     else:
 
-        if signal != "BUY":
+        signal = "NO SIGNAL"
 
-            if sell_score > score:
-                score = -sell_score
-                reasons = sell_reasons
+        # برای نمایش دلیل اصلی
+        if ema20 > ema50:
 
-            elif not reasons:
+            reasons.append(
+                "EMA bullish"
+            )
 
-                reasons = [
-                    "No early trend setup"
-                ]
+        elif ema20 < ema50:
+
+            reasons.append(
+                "EMA bearish"
+            )
+
+        if RSI_BUY_MIN <= rsi <= RSI_BUY_MAX:
+
+            reasons.append(
+                "RSI healthy"
+            )
+
+        elif rsi > 65:
+
+            reasons.append(
+                "RSI too high"
+            )
+
+        elif rsi < 40:
+
+            reasons.append(
+                "RSI too low"
+            )
+
+        if macd > macd_signal:
+
+            reasons.append(
+                "MACD bullish"
+            )
+
+        else:
+
+            reasons.append(
+                "MACD bearish"
+            )
+
+        if adx >= MIN_ADX:
+
+            reasons.append(
+                "Strong trend"
+            )
+
+        if pullback_buy or pullback_sell:
+
+            reasons.append(
+                "Pullback detected"
+            )
+
+        if not price_near_ema:
+
+            reasons.append(
+                "Price too far from EMA20"
+            )
 
 
     # =====================================================
@@ -296,21 +343,24 @@ def generate_signal(df):
 
 
     # =====================================================
-    # کیفیت
+    # Quality
     # =====================================================
 
-    if confidence >= 70:
+    if confidence >= 80:
+
         quality = "STRONG"
 
-    elif confidence >= 55:
+    elif confidence >= 60:
+
         quality = "NORMAL"
 
     else:
+
         quality = "WEAK"
 
 
     # =====================================================
-    # TP / SL
+    # SL / TP
     # =====================================================
 
     sl = None
@@ -349,7 +399,7 @@ def generate_signal(df):
 
 
     # =====================================================
-    # خروجی
+    # Result
     # =====================================================
 
     return {
