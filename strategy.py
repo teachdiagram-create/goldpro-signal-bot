@@ -2,22 +2,27 @@ from config import MIN_ADX
 
 
 # =========================================================
-# GoldPro Early Trend Strategy
+# GoldPro Early Trend Strategy V2
 # =========================================================
 
 RSI_MIN = 40
 RSI_MAX = 65
 
+MIN_ENTRY_SCORE = 70
+
 EMA_SCORE = 25
 RSI_SCORE = 20
 MACD_SCORE = 20
 ADX_SCORE = 15
-MOMENTUM_SCORE = 20
+
+PULLBACK_BONUS = 10
+MOMENTUM_BONUS = 10
 
 
 def generate_signal(df):
 
     if df is None or len(df) < 3:
+
         return {
             "signal": "NO SIGNAL",
             "score": 0,
@@ -36,12 +41,12 @@ def generate_signal(df):
     last = df.iloc[-1]
     previous = df.iloc[-2]
 
-    score = 0
-    reasons = []
+    # =====================================================
+    # مقدارها
+    # =====================================================
 
-    # =====================================================
-    # Indicators
-    # =====================================================
+    price = float(last["close"])
+    previous_close = float(previous["close"])
 
     ema20 = float(last["EMA20"])
     ema50 = float(last["EMA50"])
@@ -53,16 +58,18 @@ def generate_signal(df):
     macd_signal = float(last["MACD_SIGNAL"])
 
     previous_macd = float(previous["MACD"])
-    previous_macd_signal = float(previous["MACD_SIGNAL"])
+    previous_macd_signal = float(
+        previous["MACD_SIGNAL"]
+    )
 
     adx = float(last["ADX"])
-    price = float(last["close"])
-    previous_close = float(previous["close"])
-
     atr = float(last["ATR"])
 
+    score = 0
+    reasons = []
+
     # =====================================================
-    # TREND
+    # EMA TREND
     # =====================================================
 
     bullish_trend = ema20 > ema50
@@ -110,8 +117,13 @@ def generate_signal(df):
     # MACD
     # =====================================================
 
-    macd_bullish = macd > macd_signal
-    macd_bearish = macd < macd_signal
+    macd_bullish = (
+        macd > macd_signal
+    )
+
+    macd_bearish = (
+        macd < macd_signal
+    )
 
     if macd_bullish:
 
@@ -144,7 +156,7 @@ def generate_signal(df):
         reasons.append("Strong trend")
 
     # =====================================================
-    # PULLBACK DETECTION
+    # PULLBACK
     # =====================================================
 
     pullback_buy = (
@@ -161,50 +173,54 @@ def generate_signal(df):
 
     if pullback_buy:
 
+        score += PULLBACK_BONUS
+
         reasons.append(
             "Pullback detected"
         )
 
     elif pullback_sell:
 
+        score -= PULLBACK_BONUS
+
         reasons.append(
             "Pullback detected"
         )
 
     # =====================================================
-    # EARLY MOMENTUM RECOVERY
+    # EARLY MOMENTUM
     # =====================================================
 
-    momentum_recovery_buy = (
+    momentum_buy = (
         bullish_trend
         and rsi > previous_rsi
-        and macd > previous_macd
+        and macd >= previous_macd
     )
 
-    momentum_recovery_sell = (
+    momentum_sell = (
         bearish_trend
         and rsi < previous_rsi
-        and macd < previous_macd
+        and macd <= previous_macd
     )
 
-    if momentum_recovery_buy:
+    if momentum_buy:
 
-        score += MOMENTUM_SCORE
+        score += MOMENTUM_BONUS
 
         reasons.append(
             "Early momentum recovery"
         )
 
-    elif momentum_recovery_sell:
+    elif momentum_sell:
 
-        score -= MOMENTUM_SCORE
+        score -= MOMENTUM_BONUS
 
         reasons.append(
             "Early momentum recovery"
         )
 
     # =====================================================
-    # SIGNAL FILTER
+    # SIGNAL
     # =====================================================
 
     signal = "NO SIGNAL"
@@ -215,11 +231,7 @@ def generate_signal(df):
         and rsi_healthy
         and macd_bullish
         and strong_trend
-        and (
-            pullback_buy
-            or momentum_recovery_buy
-        )
-        and score >= 50
+        and score >= MIN_ENTRY_SCORE
     ):
 
         signal = "BUY"
@@ -230,17 +242,13 @@ def generate_signal(df):
         and rsi_healthy
         and macd_bearish
         and strong_trend
-        and (
-            pullback_sell
-            or momentum_recovery_sell
-        )
-        and score <= -50
+        and score <= -MIN_ENTRY_SCORE
     ):
 
         signal = "SELL"
 
     # =====================================================
-    # Confidence
+    # CONFIDENCE
     # =====================================================
 
     confidence = min(
@@ -249,14 +257,14 @@ def generate_signal(df):
     )
 
     # =====================================================
-    # Quality
+    # QUALITY
     # =====================================================
 
-    if confidence >= 70:
+    if confidence >= 80:
 
         quality = "STRONG"
 
-    elif confidence >= 50:
+    elif confidence >= 70:
 
         quality = "NORMAL"
 
