@@ -2,88 +2,73 @@ from config import MIN_ADX
 
 
 # =========================================================
-# GoldPro Early Trend Strategy V2
+# GoldPro Early Entry Strategy
 # =========================================================
 
 RSI_MIN = 40
 RSI_MAX = 65
 
-MIN_ENTRY_SCORE = 70
+EARLY_RSI_MIN = 42
+EARLY_RSI_MAX = 62
 
-EMA_SCORE = 25
-RSI_SCORE = 20
-MACD_SCORE = 20
-ADX_SCORE = 15
-
-PULLBACK_BONUS = 10
-MOMENTUM_BONUS = 10
+MIN_CONFIDENCE = 50
 
 
 def generate_signal(df):
 
-    if df is None or len(df) < 3:
-
-        return {
-            "signal": "NO SIGNAL",
-            "score": 0,
-            "confidence": 0,
-            "quality": "WEAK",
-            "reasons": ["Not enough data"],
-            "price": None,
-            "sl": None,
-            "tp1": None,
-            "tp2": None,
-            "rsi": None,
-            "adx": None,
-            "atr": None
-        }
-
     last = df.iloc[-1]
-    previous = df.iloc[-2]
 
-    # =====================================================
-    # مقدارها
-    # =====================================================
-
-    price = float(last["close"])
-    previous_close = float(previous["close"])
+    # -----------------------------------------------------
+    # مقدارهای فعلی
+    # -----------------------------------------------------
 
     ema20 = float(last["EMA20"])
     ema50 = float(last["EMA50"])
 
     rsi = float(last["RSI"])
-    previous_rsi = float(previous["RSI"])
 
     macd = float(last["MACD"])
     macd_signal = float(last["MACD_SIGNAL"])
 
-    previous_macd = float(previous["MACD"])
-    previous_macd_signal = float(
-        previous["MACD_SIGNAL"]
-    )
-
     adx = float(last["ADX"])
     atr = float(last["ATR"])
 
+    price = float(last["close"])
+
     score = 0
     reasons = []
+
+    # -----------------------------------------------------
+    # کندل قبلی برای تشخیص تغییر مومنتوم
+    # -----------------------------------------------------
+
+    previous = None
+
+    if len(df) >= 2:
+        previous = df.iloc[-2]
 
     # =====================================================
     # EMA TREND
     # =====================================================
 
-    bullish_trend = ema20 > ema50
-    bearish_trend = ema20 < ema50
+    ema_bullish = ema20 > ema50
+    ema_bearish = ema20 < ema50
 
-    if bullish_trend:
+    if ema_bullish:
 
-        score += EMA_SCORE
-        reasons.append("EMA bullish")
+        score += 25
 
-    elif bearish_trend:
+        reasons.append(
+            "EMA bullish"
+        )
 
-        score -= EMA_SCORE
-        reasons.append("EMA bearish")
+    elif ema_bearish:
+
+        score -= 25
+
+        reasons.append(
+            "EMA bearish"
+        )
 
     # =====================================================
     # RSI
@@ -93,25 +78,60 @@ def generate_signal(df):
         RSI_MIN <= rsi <= RSI_MAX
     )
 
+    rsi_recovery = False
+    rsi_falling = False
+
+    if previous is not None:
+
+        previous_rsi = float(
+            previous["RSI"]
+        )
+
+        # RSI در حال برگشت از ناحیه پایین
+        if (
+            previous_rsi < rsi
+            and rsi >= EARLY_RSI_MIN
+            and rsi <= EARLY_RSI_MAX
+        ):
+
+            rsi_recovery = True
+
+        # RSI در حال برگشت از ناحیه بالا
+        if (
+            previous_rsi > rsi
+            and rsi >= EARLY_RSI_MIN
+            and rsi <= EARLY_RSI_MAX
+        ):
+
+            rsi_falling = True
+
+    # -----------------------------------------------------
+    # RSI اصلی
+    # -----------------------------------------------------
+
     if rsi_healthy:
 
-        if bullish_trend:
+        score += 20
 
-            score += RSI_SCORE
-            reasons.append("RSI healthy")
-
-        elif bearish_trend:
-
-            score -= RSI_SCORE
-            reasons.append("RSI healthy")
+        reasons.append(
+            "RSI healthy"
+        )
 
     elif rsi > RSI_MAX:
 
-        reasons.append("RSI too high")
+        score -= 20
+
+        reasons.append(
+            "RSI too high"
+        )
 
     elif rsi < RSI_MIN:
 
-        reasons.append("RSI too low")
+        score -= 20
+
+        reasons.append(
+            "RSI too low"
+        )
 
     # =====================================================
     # MACD
@@ -125,15 +145,60 @@ def generate_signal(df):
         macd < macd_signal
     )
 
+    macd_recovery = False
+    macd_falling = False
+
+    if previous is not None:
+
+        previous_macd = float(
+            previous["MACD"]
+        )
+
+        previous_signal = float(
+            previous["MACD_SIGNAL"]
+        )
+
+        previous_diff = (
+            previous_macd
+            - previous_signal
+        )
+
+        current_diff = (
+            macd
+            - macd_signal
+        )
+
+        # MACD در حال نزدیک شدن به کراس صعودی
+        if (
+            current_diff > previous_diff
+            and current_diff < 0
+        ):
+
+            macd_recovery = True
+
+        # MACD در حال نزدیک شدن به کراس نزولی
+        if (
+            current_diff < previous_diff
+            and current_diff > 0
+        ):
+
+            macd_falling = True
+
     if macd_bullish:
 
-        score += MACD_SCORE
-        reasons.append("MACD bullish")
+        score += 20
+
+        reasons.append(
+            "MACD bullish"
+        )
 
     elif macd_bearish:
 
-        score -= MACD_SCORE
-        reasons.append("MACD bearish")
+        score -= 20
+
+        reasons.append(
+            "MACD bearish"
+        )
 
     # =====================================================
     # ADX
@@ -145,78 +210,65 @@ def generate_signal(df):
 
     if strong_trend:
 
-        if bullish_trend:
-
-            score += ADX_SCORE
-
-        elif bearish_trend:
-
-            score -= ADX_SCORE
-
-        reasons.append("Strong trend")
-
-    # =====================================================
-    # PULLBACK
-    # =====================================================
-
-    pullback_buy = (
-        bullish_trend
-        and previous_close < ema20
-        and price >= ema20
-    )
-
-    pullback_sell = (
-        bearish_trend
-        and previous_close > ema20
-        and price <= ema20
-    )
-
-    if pullback_buy:
-
-        score += PULLBACK_BONUS
+        score += 15
 
         reasons.append(
-            "Pullback detected"
-        )
-
-    elif pullback_sell:
-
-        score -= PULLBACK_BONUS
-
-        reasons.append(
-            "Pullback detected"
+            "Strong trend"
         )
 
     # =====================================================
-    # EARLY MOMENTUM
+    # EARLY MOMENTUM RECOVERY
     # =====================================================
 
-    momentum_buy = (
-        bullish_trend
-        and rsi > previous_rsi
-        and macd >= previous_macd
-    )
+    early_buy = False
+    early_sell = False
 
-    momentum_sell = (
-        bearish_trend
-        and rsi < previous_rsi
-        and macd <= previous_macd
-    )
+    # -----------------------------------------------------
+    # Early BUY
+    #
+    # EMA bullish
+    # RSI healthy
+    # MACD هنوز bearish است اما در حال recovery
+    # -----------------------------------------------------
 
-    if momentum_buy:
+    if (
+        ema_bullish
+        and rsi_healthy
+        and macd_recovery
+        and strong_trend
+        and RSI_MIN <= rsi <= RSI_MAX
+    ):
 
-        score += MOMENTUM_BONUS
+        early_buy = True
+
+        score += 25
 
         reasons.append(
             "Early momentum recovery"
         )
 
-    elif momentum_sell:
+    # -----------------------------------------------------
+    # Early SELL
+    #
+    # EMA bearish
+    # RSI healthy
+    # MACD هنوز bullish است اما در حال weakening
+    # -----------------------------------------------------
 
-        score -= MOMENTUM_BONUS
+    if (
+        ema_bearish
+        and rsi_healthy
+        and macd_falling
+        and strong_trend
+        and RSI_MIN <= rsi <= RSI_MAX
+    ):
+
+        early_sell = True
+
+        score -= 25
 
         reasons.append(
-            "Early momentum recovery"
+            "Early momentum weakening"
         )
 
     # =====================================================
@@ -225,46 +277,56 @@ def generate_signal(df):
 
     signal = "NO SIGNAL"
 
-    # BUY
-    if (
-        bullish_trend
-        and rsi_healthy
-        and macd_bullish
-        and strong_trend
-        and score >= MIN_ENTRY_SCORE
-    ):
-
-        signal = "BUY"
-
-    # SELL
-    elif (
-        bearish_trend
-        and rsi_healthy
-        and macd_bearish
-        and strong_trend
-        and score <= -MIN_ENTRY_SCORE
-    ):
-
-        signal = "SELL"
-
-    # =====================================================
-    # CONFIDENCE
-    # =====================================================
-
     confidence = min(
         abs(score),
         100
     )
 
+    # -----------------------------------------------------
+    # BUY
+    # -----------------------------------------------------
+
+    if (
+        ema_bullish
+        and rsi_healthy
+        and strong_trend
+        and (
+            macd_bullish
+            or early_buy
+        )
+        and score >= 40
+        and confidence >= MIN_CONFIDENCE
+    ):
+
+        signal = "BUY"
+
+    # -----------------------------------------------------
+    # SELL
+    # -----------------------------------------------------
+
+    elif (
+        ema_bearish
+        and rsi_healthy
+        and strong_trend
+        and (
+            macd_bearish
+            or early_sell
+        )
+        and score <= -40
+        and confidence >= MIN_CONFIDENCE
+    ):
+
+        signal = "SELL"
+
     # =====================================================
     # QUALITY
     # =====================================================
 
-    if confidence >= 80:
+    if confidence >= 70:
 
         quality = "STRONG"
 
-    elif confidence >= 70:
+    elif confidence >= 50:
 
         quality = "NORMAL"
 
