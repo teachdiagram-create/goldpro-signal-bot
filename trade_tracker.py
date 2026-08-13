@@ -1,909 +1,271 @@
-import json
 import csv
+import json
 import os
 from datetime import datetime, timedelta
 
 from signal_counter import get_next_signal_id
 
-
-OPEN_FILE = "open_trades.json"
-RESULT_FILE = "trade_results.csv"
-
 SL_COOLDOWN_MINUTES = 30
 MIN_SIGNAL_DISTANCE = 5.0
 
 
-# =========================================================
-# Load / Save
-# =========================================================
-
-def load_open_trades():
-
-    if not os.path.exists(OPEN_FILE):
-        return []
-
-    try:
-
-        with open(
-            OPEN_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
-
-            data = json.load(file)
-
-            if isinstance(data, list):
-                return data
-
-            return []
-
-    except Exception as e:
-
-        print("Open trades read error:", e)
-
-        return []
+def _safe_name(symbol):
+    return symbol.replace("/", "_").replace("\\", "_")
 
 
-def save_open_trades(trades):
-
-    with open(
-        OPEN_FILE,
-        "w",
-        encoding="utf-8"
-    ) as file:
-
-        json.dump(
-            trades,
-            file,
-            indent=2,
-            ensure_ascii=False
-        )
-
-
-# =========================================================
-# Save result
-# =========================================================
-
-def save_result(
-    trade,
-    outcome,
-    exit_price,
-    candle_time=None
-):
-
-    file_exists = os.path.exists(
-        RESULT_FILE
+def _files(symbol):
+    base = os.path.join("data", _safe_name(symbol))
+    os.makedirs(base, exist_ok=True)
+    return (
+        os.path.join(base, "open_trades.json"),
+        os.path.join(base, "trade_results.csv"),
     )
 
-    with open(
-        RESULT_FILE,
-        "a",
-        newline="",
-        encoding="utf-8"
-    ) as file:
 
+def load_open_trades(symbol):
+    open_file, _ = _files(symbol)
+    if not os.path.exists(open_file):
+        return []
+    try:
+        with open(open_file, "r", encoding="utf-8") as file:
+            data = json.load(file)
+            return data if isinstance(data, list) else []
+    except Exception as e:
+        print(f"[{symbol}] Open trades read error:", e)
+        return []
+
+
+def save_open_trades(symbol, trades):
+    open_file, _ = _files(symbol)
+    with open(open_file, "w", encoding="utf-8") as file:
+        json.dump(trades, file, indent=2, ensure_ascii=False)
+
+
+def save_result(symbol, trade, outcome, exit_price, candle_time=None):
+    _, result_file = _files(symbol)
+    file_exists = os.path.exists(result_file)
+
+    with open(result_file, "a", newline="", encoding="utf-8") as file:
         writer = csv.writer(file)
-
         if not file_exists:
-
             writer.writerow([
-                "time",
-                "signal_id",
-                "signal",
-                "entry",
-                "tp1",
-                "tp2",
-                "sl",
-                "exit_price",
-                "outcome",
-                "confidence",
-                "quality",
+                "time", "signal_id", "signal", "entry", "tp1", "tp2",
+                "sl", "exit_price", "outcome", "confidence", "quality",
                 "exit_candle"
             ])
 
         writer.writerow([
-
-            datetime.now().strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
-
-            trade.get(
-                "signal_id",
-                "000"
-            ),
-
-            trade["signal"],
-
-            trade["entry"],
-
-            trade["tp1"],
-
-            trade["tp2"],
-
-            trade["sl"],
-
-            exit_price,
-
-            outcome,
-
-            trade["confidence"],
-
-            trade["quality"],
-
-            candle_time or ""
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            trade.get("signal_id", "000"),
+            trade["signal"], trade["entry"], trade["tp1"], trade["tp2"],
+            trade["sl"], exit_price, outcome, trade["confidence"],
+            trade["quality"], candle_time or ""
         ])
 
 
-# =========================================================
-# SL Cooldown
-# =========================================================
-
-def is_in_sl_cooldown():
-
-    if not os.path.exists(
-        RESULT_FILE
-    ):
+def is_in_sl_cooldown(symbol):
+    _, result_file = _files(symbol)
+    if not os.path.exists(result_file):
         return False
 
     try:
-
-        with open(
-            RESULT_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
-
-            rows = list(
-                csv.DictReader(file)
-            )
-
+        with open(result_file, "r", encoding="utf-8") as file:
+            rows = list(csv.DictReader(file))
         if not rows:
             return False
 
-        last_trade = rows[-1]
-
-        outcome = last_trade.get(
-            "outcome",
-            ""
-        )
-
-        if outcome not in [
-            "LOSS",
-            "PARTIAL WIN"
-        ]:
+        last = rows[-1]
+        if last.get("outcome") not in ["LOSS", "PARTIAL WIN"]:
             return False
 
-        time_text = last_trade.get(
-            "time",
-            ""
-        )
-
-        if not time_text:
+        text = last.get("time", "")
+        if not text:
             return False
 
-        last_time = datetime.strptime(
-            time_text,
-            "%Y-%m-%d %H:%M:%S"
-        )
-
-        elapsed = (
-            datetime.now()
-            - last_time
-        )
-
-        cooldown = timedelta(
-            minutes=SL_COOLDOWN_MINUTES
-        )
-
+        elapsed = datetime.now() - datetime.strptime(text, "%Y-%m-%d %H:%M:%S")
+        cooldown = timedelta(minutes=SL_COOLDOWN_MINUTES)
         if elapsed < cooldown:
-
-            remaining = (
-                cooldown - elapsed
-            )
-
-            minutes = int(
-                remaining.total_seconds()
-                / 60
-            )
-
-            print(
-                f"SL cooldown active - "
-                f"{minutes} minutes remaining"
-            )
-
+            remaining = int((cooldown - elapsed).total_seconds() / 60)
+            print(f"[{symbol}] SL cooldown active - {remaining} minutes remaining")
             return True
-
         return False
-
     except Exception as e:
-
-        print(
-            "Cooldown check error:",
-            e
-        )
-
+        print(f"[{symbol}] Cooldown check error:", e)
         return False
 
 
-# =========================================================
-# Price distance
-# =========================================================
-
-def is_price_too_close(new_entry):
-
-    if not os.path.exists(
-        RESULT_FILE
-    ):
+def is_price_too_close(symbol, new_entry):
+    _, result_file = _files(symbol)
+    if not os.path.exists(result_file):
         return False
 
     try:
-
-        with open(
-            RESULT_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
-
-            rows = list(
-                csv.DictReader(file)
-            )
-
+        with open(result_file, "r", encoding="utf-8") as file:
+            rows = list(csv.DictReader(file))
         if not rows:
             return False
 
-        last_trade = rows[-1]
-
-        last_entry = float(
-            last_trade["entry"]
-        )
-
-        distance = abs(
-            new_entry - last_entry
-        )
-
+        distance = abs(new_entry - float(rows[-1]["entry"]))
         if distance < MIN_SIGNAL_DISTANCE:
-
-            print(
-                f"Signal too close - "
-                f"distance: {distance:.2f}"
-            )
-
+            print(f"[{symbol}] Signal too close - distance: {distance:.2f}")
             return True
-
         return False
-
     except Exception as e:
-
-        print(
-            "Price distance check error:",
-            e
-        )
-
+        print(f"[{symbol}] Price distance check error:", e)
         return False
 
 
-# =========================================================
-# Add trade
-# =========================================================
-
-def add_trade(
-    result,
-    signal_candle_time
-):
-
-    if result.get("signal") in [
-        None,
-        "",
-        "NO SIGNAL"
-    ]:
+def add_trade(symbol, result, signal_candle_time):
+    if result.get("signal") in [None, "", "NO SIGNAL"]:
         return False
 
-    trades = load_open_trades()
+    trades = load_open_trades(symbol)
+    new_entry = float(result["price"])
 
-    new_signal = result["signal"]
-
-    new_entry = float(
-        result["price"]
-    )
-
-    # -----------------------------------------------------
-    # فقط یک معامله باز
-    # -----------------------------------------------------
-
-    if len(trades) > 0:
-
-        print(
-            "Open trade already exists - "
-            "new signal ignored"
-        )
-
+    if trades:
+        print(f"[{symbol}] Open trade already exists - new signal ignored")
         return False
 
-    # -----------------------------------------------------
-    # Cooldown
-    # -----------------------------------------------------
-
-    if is_in_sl_cooldown():
-
-        print(
-            "SL cooldown active - "
-            "new signal ignored"
-        )
-
+    if is_in_sl_cooldown(symbol):
+        print(f"[{symbol}] SL cooldown active - new signal ignored")
         return False
 
-    # -----------------------------------------------------
-    # فاصله قیمت
-    # -----------------------------------------------------
-
-    if is_price_too_close(
-        new_entry
-    ):
-
-        print(
-            "Signal price too close - "
-            "new signal ignored"
-        )
-
+    if is_price_too_close(symbol, new_entry):
+        print(f"[{symbol}] Signal price too close - new signal ignored")
         return False
 
-    # -----------------------------------------------------
-    # Signal ID
-    # -----------------------------------------------------
-
-    signal_id = get_next_signal_id()
-
-    # -----------------------------------------------------
-    # زمان سیستم
-    # -----------------------------------------------------
-
-    signal_time = datetime.now().strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
-
-    # -----------------------------------------------------
-    # Trade
-    # -----------------------------------------------------
+    signal_id = get_next_signal_id(symbol)
+    signal_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     trade = {
-
-        "id": datetime.now().strftime(
-            "%Y%m%d%H%M%S"
-        ),
-
+        "id": datetime.now().strftime("%Y%m%d%H%M%S"),
         "signal_id": signal_id,
-
-        # زمان اجرای برنامه
         "time": signal_time,
-
-        # زمان واقعی کندل سیگنال
-        "signal_candle_time": str(
-            signal_candle_time
-        ),
-
-        "signal": new_signal,
-
+        "signal_candle_time": str(signal_candle_time),
+        "signal": result["signal"],
         "entry": new_entry,
-
-        "tp1": float(
-            result["tp1"]
-        ),
-
-        "tp2": float(
-            result["tp2"]
-        ),
-
-        "sl": float(
-            result["sl"]
-        ),
-
-        "confidence": result[
-            "confidence"
-        ],
-
-        "quality": result[
-            "quality"
-        ],
-
+        "tp1": float(result["tp1"]),
+        "tp2": float(result["tp2"]),
+        "sl": float(result["sl"]),
+        "confidence": result["confidence"],
+        "quality": result["quality"],
         "tp1_hit": False,
-
-        # آخرین کندلی که بررسی شده
-        "last_candle_time": str(
-            signal_candle_time
-        ),
-
-        # ذخیره کندل‌های بعد از سیگنال
+        "last_candle_time": str(signal_candle_time),
         "candles": []
     }
 
     trades.append(trade)
-
-    save_open_trades(
-        trades
-    )
-
+    save_open_trades(symbol, trades)
     result["signal_id"] = signal_id
 
-    print(
-        f"Trade tracker: "
-        f"Signal #{signal_id} added"
-    )
-
-    print(
-        f"Signal candle: "
-        f"{signal_candle_time}"
-    )
-
+    print(f"[{symbol}] Trade tracker: Signal #{signal_id} added")
+    print(f"[{symbol}] Signal candle: {signal_candle_time}")
     return True
 
 
-# =========================================================
-# Update trades
-# =========================================================
+def pd_to_datetime(value):
+    from pandas import to_datetime
+    return to_datetime(value)
 
-def update_trades(df):
 
-    trades = load_open_trades()
-
+def update_trades(symbol, df):
+    trades = load_open_trades(symbol)
     if not trades:
-
-        print(
-            "Trade tracker: No open trades"
-        )
-
+        print(f"[{symbol}] Trade tracker: No open trades")
         return []
-
     if df is None or df.empty:
-
-        print(
-            "Trade tracker: No candle data"
-        )
-
+        print(f"[{symbol}] Trade tracker: No candle data")
         return []
 
     results = []
-
     remaining = []
 
-    # -----------------------------------------------------
-    # هر معامله باز
-    # -----------------------------------------------------
-
     for trade in trades:
-
         signal = trade["signal"]
-
-        signal_id = trade.get(
-            "signal_id",
-            "000"
-        )
-
-        # زمان واقعی کندلی که سیگنال روی آن صادر شده
-        signal_candle_time = trade.get(
-            "signal_candle_time"
-        )
-
-        last_candle_time = trade.get(
-            "last_candle_time"
-        )
-
+        signal_id = trade.get("signal_id", "000")
+        signal_candle_time = trade.get("signal_candle_time")
+        last_candle_time = trade.get("last_candle_time")
         trade_closed = False
 
-        # -------------------------------------------------
-        # بررسی کندل‌ها
-        # -------------------------------------------------
-
         for _, candle in df.iterrows():
-
-            candle_time = str(
-                candle["time"]
-            )
-
+            candle_time = str(candle["time"])
             try:
-
-                candle_dt = pd_to_datetime(
-                    candle_time
-                )
-
+                candle_dt = pd_to_datetime(candle_time)
             except Exception:
-
                 continue
 
-            # =============================================
-            # مهم:
-            # کندل سیگنال و قبل از آن را بررسی نکن
-            # =============================================
-
             if signal_candle_time:
-
                 try:
-
-                    signal_dt = pd_to_datetime(
-                        signal_candle_time
-                    )
-
-                    if candle_dt <= signal_dt:
-
+                    if candle_dt <= pd_to_datetime(signal_candle_time):
                         continue
-
                 except Exception:
-
                     pass
-
-            # =============================================
-            # کندل‌های قبلاً بررسی‌شده
-            # =============================================
 
             if last_candle_time:
-
                 try:
-
-                    last_dt = pd_to_datetime(
-                        last_candle_time
-                    )
-
-                    if candle_dt <= last_dt:
-
+                    if candle_dt <= pd_to_datetime(last_candle_time):
                         continue
-
                 except Exception:
-
                     pass
 
-            # =============================================
-            # High / Low
-            # =============================================
+            high = float(candle["high"])
+            low = float(candle["low"])
 
-            high = float(
-                candle["high"]
-            )
+            print(f"🔎 [{symbol}] Signal #{signal_id} | Candle: {candle_time} | High: {high} | Low: {low}")
 
-            low = float(
-                candle["low"]
-            )
-
-            print(
-                f"🔎 Signal #{signal_id} | "
-                f"Candle: {candle_time} | "
-                f"High: {high} | "
-                f"Low: {low}"
-            )
-
-            # =============================================
-            # ذخیره کندل
-            # =============================================
-
-            trade.setdefault(
-                "candles",
-                []
-            )
-
-            trade["candles"].append({
-
+            trade.setdefault("candles", []).append({
                 "time": candle_time,
-
-                "open": float(
-                    candle["open"]
-                ),
-
+                "open": float(candle["open"]),
                 "high": high,
-
                 "low": low,
-
-                "close": float(
-                    candle["close"]
-                )
+                "close": float(candle["close"])
             })
-
-            trade[
-                "last_candle_time"
-            ] = candle_time
-
-            # =============================================
-            # BUY
-            # =============================================
+            trade["last_candle_time"] = candle_time
 
             if signal == "BUY":
-
-                # -----------------------------------------
-                # SL
-                # -----------------------------------------
-
-                if low <= float(
-                    trade["sl"]
-                ):
-
-                    if trade["tp1_hit"]:
-
-                        outcome = (
-                            "PARTIAL WIN"
-                        )
-
-                    else:
-
-                        outcome = "LOSS"
-
-                    save_result(
-                        trade,
-                        outcome,
-                        trade["sl"],
-                        candle_time
-                    )
-
-                    results.append({
-
-                        "signal_id":
-                            signal_id,
-
-                        "signal":
-                            signal,
-
-                        "outcome":
-                            outcome,
-
-                        "price":
-                            trade["sl"]
-                    })
-
-                    print(
-                        f"🔴 Signal #{signal_id} "
-                        f"SL HIT | "
-                        f"Candle={candle_time} | "
-                        f"Low={low} | "
-                        f"SL={trade['sl']}"
-                    )
-
+                if low <= float(trade["sl"]):
+                    outcome = "PARTIAL WIN" if trade["tp1_hit"] else "LOSS"
+                    save_result(symbol, trade, outcome, trade["sl"], candle_time)
+                    results.append({"signal_id": signal_id, "signal": signal, "outcome": outcome, "price": trade["sl"]})
+                    print(f"🔴 [{symbol}] Signal #{signal_id} SL HIT | Low={low} SL={trade['sl']}")
                     trade_closed = True
-
                     break
 
-                # -----------------------------------------
-                # TP2
-                # -----------------------------------------
-
-                if high >= float(
-                    trade["tp2"]
-                ):
-
-                    save_result(
-                        trade,
-                        "WIN",
-                        trade["tp2"],
-                        candle_time
-                    )
-
-                    results.append({
-
-                        "signal_id":
-                            signal_id,
-
-                        "signal":
-                            signal,
-
-                        "outcome":
-                            "WIN",
-
-                        "price":
-                            trade["tp2"]
-                    })
-
-                    print(
-                        f"🏆 Signal #{signal_id} "
-                        f"TP2 HIT | "
-                        f"Candle={candle_time} | "
-                        f"High={high} | "
-                        f"TP2={trade['tp2']}"
-                    )
-
+                if high >= float(trade["tp2"]):
+                    save_result(symbol, trade, "WIN", trade["tp2"], candle_time)
+                    results.append({"signal_id": signal_id, "signal": signal, "outcome": "WIN", "price": trade["tp2"]})
+                    print(f"🏆 [{symbol}] Signal #{signal_id} TP2 HIT | High={high} TP2={trade['tp2']}")
                     trade_closed = True
-
                     break
 
-                # -----------------------------------------
-                # TP1
-                # -----------------------------------------
-
-                if high >= float(
-                    trade["tp1"]
-                ):
-
-                    if not trade[
-                        "tp1_hit"
-                    ]:
-
-                        trade[
-                            "tp1_hit"
-                        ] = True
-
-                        results.append({
-
-                            "signal_id":
-                                signal_id,
-
-                            "signal":
-                                signal,
-
-                            "outcome":
-                                "TP1 HIT",
-
-                            "price":
-                                trade["tp1"]
-                        })
-
-                        print(
-                            f"🟢 Signal #{signal_id} "
-                            f"TP1 HIT | "
-                            f"Candle={candle_time} | "
-                            f"High={high} | "
-                            f"TP1={trade['tp1']}"
-                        )
-
-            # =============================================
-            # SELL
-            # =============================================
+                if high >= float(trade["tp1"]) and not trade["tp1_hit"]:
+                    trade["tp1_hit"] = True
+                    results.append({"signal_id": signal_id, "signal": signal, "outcome": "TP1 HIT", "price": trade["tp1"]})
+                    print(f"🟢 [{symbol}] Signal #{signal_id} TP1 HIT | High={high} TP1={trade['tp1']}")
 
             elif signal == "SELL":
-
-                # -----------------------------------------
-                # SL
-                # -----------------------------------------
-
-                if high >= float(
-                    trade["sl"]
-                ):
-
-                    if trade["tp1_hit"]:
-
-                        outcome = (
-                            "PARTIAL WIN"
-                        )
-
-                    else:
-
-                        outcome = "LOSS"
-
-                    save_result(
-                        trade,
-                        outcome,
-                        trade["sl"],
-                        candle_time
-                    )
-
-                    results.append({
-
-                        "signal_id":
-                            signal_id,
-
-                        "signal":
-                            signal,
-
-                        "outcome":
-                            outcome,
-
-                        "price":
-                            trade["sl"]
-                    })
-
-                    print(
-                        f"🔴 Signal #{signal_id} "
-                        f"SL HIT | "
-                        f"Candle={candle_time} | "
-                        f"High={high} | "
-                        f"SL={trade['sl']}"
-                    )
-
+                if high >= float(trade["sl"]):
+                    outcome = "PARTIAL WIN" if trade["tp1_hit"] else "LOSS"
+                    save_result(symbol, trade, outcome, trade["sl"], candle_time)
+                    results.append({"signal_id": signal_id, "signal": signal, "outcome": outcome, "price": trade["sl"]})
+                    print(f"🔴 [{symbol}] Signal #{signal_id} SL HIT | High={high} SL={trade['sl']}")
                     trade_closed = True
-
                     break
 
-                # -----------------------------------------
-                # TP2
-                # -----------------------------------------
-
-                if low <= float(
-                    trade["tp2"]
-                ):
-
-                    save_result(
-                        trade,
-                        "WIN",
-                        trade["tp2"],
-                        candle_time
-                    )
-
-                    results.append({
-
-                        "signal_id":
-                            signal_id,
-
-                        "signal":
-                            signal,
-
-                        "outcome":
-                            "WIN",
-
-                        "price":
-                            trade["tp2"]
-                    })
-
-                    print(
-                        f"🏆 Signal #{signal_id} "
-                        f"TP2 HIT | "
-                        f"Candle={candle_time} | "
-                        f"Low={low} | "
-                        f"TP2={trade['tp2']}"
-                    )
-
+                if low <= float(trade["tp2"]):
+                    save_result(symbol, trade, "WIN", trade["tp2"], candle_time)
+                    results.append({"signal_id": signal_id, "signal": signal, "outcome": "WIN", "price": trade["tp2"]})
+                    print(f"🏆 [{symbol}] Signal #{signal_id} TP2 HIT | Low={low} TP2={trade['tp2']}")
                     trade_closed = True
-
                     break
 
-                # -----------------------------------------
-                # TP1
-                # -----------------------------------------
-
-                if low <= float(
-                    trade["tp1"]
-                ):
-
-                    if not trade[
-                        "tp1_hit"
-                    ]:
-
-                        trade[
-                            "tp1_hit"
-                        ] = True
-
-                        results.append({
-
-                            "signal_id":
-                                signal_id,
-
-                            "signal":
-                                signal,
-
-                            "outcome":
-                                "TP1 HIT",
-
-                            "price":
-                                trade["tp1"]
-                        })
-
-                        print(
-                            f"🟢 Signal #{signal_id} "
-                            f"TP1 HIT | "
-                            f"Candle={candle_time} | "
-                            f"Low={low} | "
-                            f"TP1={trade['tp1']}"
-                        )
-
-        # -------------------------------------------------
-        # معامله هنوز باز است
-        # -------------------------------------------------
+                if low <= float(trade["tp1"]) and not trade["tp1_hit"]:
+                    trade["tp1_hit"] = True
+                    results.append({"signal_id": signal_id, "signal": signal, "outcome": "TP1 HIT", "price": trade["tp1"]})
+                    print(f"🟢 [{symbol}] Signal #{signal_id} TP1 HIT | Low={low} TP1={trade['tp1']}")
 
         if not trade_closed:
+            remaining.append(trade)
 
-            remaining.append(
-                trade
-            )
-
-    # -----------------------------------------------------
-    # ذخیره
-    # -----------------------------------------------------
-
-    save_open_trades(
-        remaining
-    )
-
+    save_open_trades(symbol, remaining)
     return results
-
-
-# =========================================================
-# Date helper
-# =========================================================
-
-def pd_to_datetime(value):
-
-    from pandas import to_datetime
-
-    return to_datetime(value)
