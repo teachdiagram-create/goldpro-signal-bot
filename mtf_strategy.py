@@ -1,24 +1,22 @@
 from config import MIN_ADX
 
 # =========================================================
-# GoldPro MTF Strategy
-# 15M Trend → Historical 5M Pullback → 1M Trigger
+# GoldPro MTF Early Entry Strategy
+# 15M Trend → 5M Pullback / Momentum → 1M Trigger
 # =========================================================
 
-RSI_BUY_MIN = 40
+RSI_BUY_MIN = 38
 RSI_BUY_MAX = 68
 
 RSI_SELL_MIN = 32
-RSI_SELL_MAX = 60
+RSI_SELL_MAX = 62
 
-# چند کندل 5M اخیر برای پیدا کردن Pullback
-PULLBACK_LOOKBACK = 8
+# فاصله قابل قبول از EMA20 بر اساس ATR
+NORMAL_PULLBACK_ATR = 0.75
+EARLY_ENTRY_ATR = 1.50
 
-# فاصله قابل قبول Pullback از EMA20 بر اساس ATR
-PULLBACK_ATR = 0.90
-
-# حداکثر فاصله برای جلوگیری از ورود دیرهنگام
-MAX_ENTRY_ATR = 1.50
+# برای جلوگیری از ورود خیلی دیر
+MAX_EXTENSION_ATR = 2.00
 
 
 def _latest(df):
@@ -52,63 +50,6 @@ def _trend_15m(df15):
 
 
 # =========================================================
-# HISTORICAL 5M PULLBACK
-# =========================================================
-
-def _find_recent_pullback(df5, direction):
-
-    if len(df5) < 3:
-        return False, None
-
-    start = max(0, len(df5) - PULLBACK_LOOKBACK)
-
-    recent = df5.iloc[start:]
-
-    for i in range(len(recent) - 1, -1, -1):
-
-        row = recent.iloc[i]
-
-        price = float(row["close"])
-        ema20 = float(row["EMA20"])
-        atr = float(row["ATR"])
-
-        if atr <= 0:
-            continue
-
-        distance = abs(price - ema20)
-
-        # -------------------------
-        # BUY pullback
-        # -------------------------
-
-        if direction == "BUY":
-
-            ema20_ok = (
-                abs(price - ema20)
-                <= atr * PULLBACK_ATR
-            )
-
-            if ema20_ok:
-                return True, row
-
-        # -------------------------
-        # SELL pullback
-        # -------------------------
-
-        else:
-
-            ema20_ok = (
-                abs(price - ema20)
-                <= atr * PULLBACK_ATR
-            )
-
-            if ema20_ok:
-                return True, row
-
-    return False, None
-
-
-# =========================================================
 # 5M SETUP
 # =========================================================
 
@@ -116,126 +57,158 @@ def _setup_5m(df5, direction):
 
     last = _latest(df5)
 
+    prev = df5.iloc[-2] if len(df5) >= 2 else None
+
     price = float(last["close"])
     ema20 = float(last["EMA20"])
     ema50 = float(last["EMA50"])
     rsi = float(last["RSI"])
     adx = float(last["ADX"])
     atr = float(last["ATR"])
-
     macd = float(last["MACD"])
     macd_signal = float(last["MACD_SIGNAL"])
 
-    # -----------------------------------------------------
-    # Current 5M trend
-    # -----------------------------------------------------
+    distance_from_ema = abs(price - ema20)
+
+    # =====================================================
+    # BUY
+    # =====================================================
 
     if direction == "BUY":
 
         trend_ok = ema20 > ema50
 
-        rsi_ok = (
-            RSI_BUY_MIN <= rsi <= RSI_BUY_MAX
+        rsi_ok = RSI_BUY_MIN <= rsi <= RSI_BUY_MAX
+
+        macd_ok = macd >= macd_signal
+
+        # Pullback معمولی
+        normal_pullback = (
+            distance_from_ema <= atr * NORMAL_PULLBACK_ATR
         )
+
+        # ورود زودتر در شروع حرکت
+        early_entry = (
+            distance_from_ema <= atr * EARLY_ENTRY_ATR
+            and rsi >= 42
+        )
+
+        momentum_recovery = False
+
+        if prev is not None:
+
+            previous_macd = float(prev["MACD"])
+            previous_signal = float(prev["MACD_SIGNAL"])
+
+            previous_diff = (
+                previous_macd - previous_signal
+            )
+
+            current_diff = (
+                macd - macd_signal
+            )
+
+            if current_diff > previous_diff:
+                momentum_recovery = True
+
+        setup = (
+            trend_ok
+            and adx >= MIN_ADX
+            and rsi_ok
+            and (
+                normal_pullback
+                or early_entry
+            )
+            and (
+                macd_ok
+                or momentum_recovery
+            )
+        )
+
+    # =====================================================
+    # SELL
+    # =====================================================
 
     else:
 
         trend_ok = ema20 < ema50
 
-        rsi_ok = (
-            RSI_SELL_MIN <= rsi <= RSI_SELL_MAX
+        rsi_ok = RSI_SELL_MIN <= rsi <= RSI_SELL_MAX
+
+        macd_ok = macd <= macd_signal
+
+        # Pullback معمولی
+        normal_pullback = (
+            distance_from_ema <= atr * NORMAL_PULLBACK_ATR
         )
 
-    adx_ok = adx >= MIN_ADX
+        # -------------------------------------------------
+        # Early SELL
+        #
+        # اگر روند قوی نزولی باشد، اجازه می‌دهیم
+        # کمی دورتر از EMA20 هم وارد شویم.
+        # -------------------------------------------------
 
-    # -----------------------------------------------------
-    # Historical pullback
-    # -----------------------------------------------------
+        strong_sell_momentum = (
+            macd < macd_signal
+            and adx >= MIN_ADX
+        )
 
-    pullback_found, pullback_row = _find_recent_pullback(
-        df5,
-        direction
-    )
+        early_entry = (
+            distance_from_ema <= atr * EARLY_ENTRY_ATR
+            and (
+                rsi >= 35
+                or strong_sell_momentum
+            )
+        )
 
-    # -----------------------------------------------------
-    # Current distance from EMA20
-    # -----------------------------------------------------
+        # اگر RSI بیش از حد oversold شده،
+        # ورود خیلی دیر را قبول نمی‌کنیم.
+        not_extreme = rsi >= 28
 
-    distance_from_ema = abs(price - ema20)
+        setup = (
+            trend_ok
+            and adx >= MIN_ADX
+            and rsi_ok
+            and not_extreme
+            and (
+                normal_pullback
+                or early_entry
+            )
+            and macd_ok
+        )
+
+    # =====================================================
+    # اطلاعات تشخیصی
+    # =====================================================
 
     entry_not_extended = (
-        distance_from_ema <= atr * MAX_ENTRY_ATR
+        distance_from_ema <= atr * MAX_EXTENSION_ATR
     )
-
-    # -----------------------------------------------------
-    # Momentum
-    # -----------------------------------------------------
-
-    if direction == "BUY":
-
-        momentum_ok = (
-            macd >= macd_signal
-            or macd > 0
-        )
-
-    else:
-
-        momentum_ok = (
-            macd <= macd_signal
-            or macd < 0
-        )
-
-    # -----------------------------------------------------
-    # Final setup
-    # -----------------------------------------------------
-
-    setup = (
-        trend_ok
-        and adx_ok
-        and pullback_found
-        and entry_not_extended
-        and momentum_ok
-    )
-
-    reasons = [
-        "15M trend confirmed"
-    ]
-
-    if pullback_found:
-        reasons.append("Recent 5M pullback found")
-    else:
-        reasons.append("No recent 5M pullback")
-
-    if entry_not_extended:
-        reasons.append("Entry distance acceptable")
-    else:
-        reasons.append("Entry too late after pullback")
-
-    if momentum_ok:
-        reasons.append("5M momentum confirmed")
-
-    if not rsi_ok:
-        reasons.append("RSI outside ideal zone")
 
     return setup, {
+
         "price": price,
+
         "rsi": rsi,
+
         "adx": adx,
+
         "atr": atr,
+
         "ema20": ema20,
+
         "ema50": ema50,
+
         "macd": macd,
+
         "macd_signal": macd_signal,
+
         "time": str(last["time"]),
+
         "distance_from_ema": distance_from_ema,
-        "entry_not_extended": entry_not_extended,
-        "pullback_found": pullback_found,
-        "pullback_time": (
-            str(pullback_row["time"])
-            if pullback_row is not None
-            else None
-        ),
-        "reasons": reasons
+
+        "entry_not_extended": entry_not_extended
     }
 
 
@@ -246,13 +219,17 @@ def _setup_5m(df5, direction):
 def _trigger_1m(df1, direction):
 
     if df1 is None or len(df1) < 3:
+
         return False, "Not enough 1M candles"
 
     last = _latest(df1)
+
     prev = df1.iloc[-2]
 
     close = float(last["close"])
+
     open_ = float(last["open"])
+
     prev_close = float(prev["close"])
 
     ema = float(last["EMA20"])
@@ -260,40 +237,63 @@ def _trigger_1m(df1, direction):
     rsi = float(last["RSI"])
 
     macd = float(last["MACD"])
+
     macd_sig = float(last["MACD_SIGNAL"])
 
     # =====================================================
-    # BUY
+    # BUY TRIGGER
     # =====================================================
 
     if direction == "BUY":
 
+        bullish_candle = close > open_
+
+        higher_close = close > prev_close
+
+        above_ema = close >= ema
+
+        rsi_trigger = rsi >= 43
+
+        macd_trigger = macd >= macd_sig
+
         trigger = (
-            close > open_
-            and close > prev_close
-            and close >= ema
-            and rsi >= 45
-            and macd >= macd_sig
+            bullish_candle
+            and higher_close
+            and above_ema
+            and rsi_trigger
+            and macd_trigger
         )
 
         if trigger:
+
             return True, "1M bullish trigger"
 
         return False, "Waiting for 1M bullish trigger"
 
     # =====================================================
-    # SELL
+    # SELL TRIGGER
     # =====================================================
 
+    bearish_candle = close < open_
+
+    lower_close = close < prev_close
+
+    below_ema = close <= ema
+
+    rsi_trigger = rsi <= 57
+
+    macd_trigger = macd <= macd_sig
+
     trigger = (
-        close < open_
-        and close < prev_close
-        and close <= ema
-        and rsi <= 55
-        and macd <= macd_sig
+        bearish_candle
+        and lower_close
+        and below_ema
+        and rsi_trigger
+        and macd_trigger
     )
 
     if trigger:
+
         return True, "1M bearish trigger"
 
     return False, "Waiting for 1M bearish trigger"
@@ -306,9 +306,11 @@ def _trigger_1m(df1, direction):
 def generate_mtf_signal(df15, df5, df1=None):
 
     df15 = add_mtf_indicators(df15)
+
     df5 = add_mtf_indicators(df5)
 
     if df1 is not None:
+
         df1 = add_mtf_indicators(df1)
 
     # =====================================================
@@ -339,27 +341,41 @@ def generate_mtf_signal(df15, df5, df1=None):
     if not setup:
 
         return {
+
             "signal": "NO SIGNAL",
+
             "stage": "5M",
+
             "trend": direction,
-            "reasons": s["reasons"],
+
+            "reasons": [
+                "15M trend confirmed",
+                "No 5M early-entry setup"
+            ],
+
             **s
         }
 
     # =====================================================
-    # WAIT FOR 1M
+    # 5M READY
     # =====================================================
 
     if df1 is None:
 
         return {
+
             "signal": "NO SIGNAL",
+
             "stage": "1M",
+
             "trend": direction,
+
             "reasons": [
-                *s["reasons"],
+                "15M trend confirmed",
+                "5M early-entry setup ready",
                 "Waiting for 1M trigger"
             ],
+
             **s
         }
 
@@ -372,95 +388,4 @@ def generate_mtf_signal(df15, df5, df1=None):
         direction
     )
 
-    if not trigger:
-
-        return {
-            "signal": "NO SIGNAL",
-            "stage": "1M",
-            "trend": direction,
-            "reasons": [
-                *s["reasons"],
-                trigger_reason
-            ],
-            **s
-        }
-
-    # =====================================================
-    # FINAL SIGNAL
-    # =====================================================
-
-    score = 80
-    confidence = 80
-    quality = "STRONG"
-
-    signal = direction
-
-    if direction == "BUY":
-
-        sl = (
-            s["price"]
-            - s["atr"] * 1.5
-        )
-
-        tp1 = (
-            s["price"]
-            + s["atr"] * 2
-        )
-
-        tp2 = (
-            s["price"]
-            + s["atr"] * 3
-        )
-
-    else:
-
-        sl = (
-            s["price"]
-            + s["atr"] * 1.5
-        )
-
-        tp1 = (
-            s["price"]
-            - s["atr"] * 2
-        )
-
-        tp2 = (
-            s["price"]
-            - s["atr"] * 3
-        )
-
-    return {
-
-        "signal": signal,
-
-        "score": score,
-
-        "confidence": confidence,
-
-        "quality": quality,
-
-        "reasons": [
-            *s["reasons"],
-            trigger_reason
-        ],
-
-        "price": s["price"],
-
-        "sl": sl,
-
-        "tp1": tp1,
-
-        "tp2": tp2,
-
-        "rsi": s["rsi"],
-
-        "adx": s["adx"],
-
-        "atr": s["atr"],
-
-        "stage": "1M",
-
-        "trend": direction,
-
-        "pullback_time": s["pullback_time"]
-    }
+   
