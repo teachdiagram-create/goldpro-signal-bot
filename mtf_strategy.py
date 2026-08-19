@@ -1,31 +1,96 @@
 from config import MIN_ADX
 
 # =========================================================
-# GoldPro MTF Strategy
-# 30M Trend → 15M Confirmation → 5M Entry
+# GoldPro MTF Strategy v4
+#
+# 30M Trend
+#     ↓
+# 15M Confirmation
+#     ↓
+# Support / Resistance
+#     ↓
+# 5M Smart Entry
+#
+# هدف:
+# - از دست ندادن روندهای قوی
+# - جلوگیری از ورود نزدیک سقف/کف
+# - استفاده از شکست حمایت/مقاومت
 # =========================================================
 
-RSI_BUY_MIN = 35
-RSI_BUY_MAX = 68
 
-RSI_SELL_MIN = 32
-RSI_SELL_MAX = 65
+# -----------------------------
+# RSI
+# -----------------------------
 
-# حداکثر فاصله قیمت از EMA20 بر اساس ATR
-MAX_ENTRY_DISTANCE_ATR = 1.20
+RSI_BUY_MIN = 40
+RSI_BUY_MAX = 75
+
+RSI_SELL_MIN = 25
+RSI_SELL_MAX = 60
+
+
+# -----------------------------
+# Support / Resistance
+# -----------------------------
+
+SR_LOOKBACK = 50
+
+SR_ZONE_ATR = 0.50
+
+BREAKOUT_ATR = 0.20
+
+
+# -----------------------------
+# Strong trend
+# -----------------------------
+
+STRONG_ADX = 35
 
 
 def _latest(df):
     return df.iloc[-1]
 
 
+# =========================================================
+# INDICATORS
+# =========================================================
+
 def add_mtf_indicators(df):
+
     from indicators import add_indicators
+
     return add_indicators(df.copy())
 
 
 # =========================================================
-# 30M MAIN TREND
+# SUPPORT / RESISTANCE
+# =========================================================
+
+def _support_resistance(df):
+
+    if df is None or df.empty:
+        return None, None
+
+    lookback = min(
+        SR_LOOKBACK,
+        len(df)
+    )
+
+    recent = df.tail(lookback)
+
+    support = float(
+        recent["low"].min()
+    )
+
+    resistance = float(
+        recent["high"].max()
+    )
+
+    return support, resistance
+
+
+# =========================================================
+# 30M TREND
 # =========================================================
 
 def _trend_30m(df30):
@@ -36,10 +101,16 @@ def _trend_30m(df30):
     ema50 = float(last["EMA50"])
     adx = float(last["ADX"])
 
-    if ema20 > ema50 and adx >= MIN_ADX:
+    if (
+        ema20 > ema50
+        and adx >= MIN_ADX
+    ):
         return "BUY"
 
-    if ema20 < ema50 and adx >= MIN_ADX:
+    if (
+        ema20 < ema50
+        and adx >= MIN_ADX
+    ):
         return "SELL"
 
     return "NONE"
@@ -58,11 +129,14 @@ def _confirm_15m(df15, direction):
     adx = float(last["ADX"])
 
     if direction == "BUY":
+
         confirmed = (
             ema20 > ema50
             and adx >= MIN_ADX
         )
+
     else:
+
         confirmed = (
             ema20 < ema50
             and adx >= MIN_ADX
@@ -77,119 +151,453 @@ def _confirm_15m(df15, direction):
 
 
 # =========================================================
-# 5M ENTRY
+# 5M SMART ENTRY
 # =========================================================
 
 def _entry_5m(df5, direction):
 
     last = _latest(df5)
 
-    prev = (
+    previous = (
         df5.iloc[-2]
         if len(df5) >= 2
         else None
     )
 
     price = float(last["close"])
-    open_price = float(last["open"])
 
-    ema20 = float(last["EMA20"])
-    ema50 = float(last["EMA50"])
-
-    rsi = float(last["RSI"])
-    adx = float(last["ADX"])
-    atr = float(last["ATR"])
-
-    macd = float(last["MACD"])
-    macd_signal = float(last["MACD_SIGNAL"])
-
-    distance_from_ema = abs(
-        price - ema20
+    open_price = float(
+        last["open"]
     )
 
-    entry_not_extended = (
-        distance_from_ema
-        <= atr * MAX_ENTRY_DISTANCE_ATR
+    ema20 = float(
+        last["EMA20"]
     )
 
-    # -----------------------------------------------------
-    # BUY
-    # -----------------------------------------------------
+    ema50 = float(
+        last["EMA50"]
+    )
+
+    rsi = float(
+        last["RSI"]
+    )
+
+    adx = float(
+        last["ADX"]
+    )
+
+    atr = float(
+        last["ATR"]
+    )
+
+    macd = float(
+        last["MACD"]
+    )
+
+    macd_signal = float(
+        last["MACD_SIGNAL"]
+    )
+
+    # =====================================================
+    # SUPPORT / RESISTANCE
+    # =====================================================
+
+    support, resistance = _support_resistance(
+        df5
+    )
+
+    distance_to_support = (
+        price - support
+        if support is not None
+        else None
+    )
+
+    distance_to_resistance = (
+        resistance - price
+        if resistance is not None
+        else None
+    )
+
+    near_support = (
+        distance_to_support is not None
+        and distance_to_support
+        <= atr * SR_ZONE_ATR
+    )
+
+    near_resistance = (
+        distance_to_resistance is not None
+        and distance_to_resistance
+        <= atr * SR_ZONE_ATR
+    )
+
+    # =====================================================
+    # BREAKOUT
+    # =====================================================
+
+    breakout_resistance = False
+    breakout_support = False
+
+    if previous is not None:
+
+        previous_close = float(
+            previous["close"]
+        )
+
+        if resistance is not None:
+
+            breakout_resistance = (
+                price > resistance
+                and previous_close <= resistance
+            )
+
+        if support is not None:
+
+            breakout_support = (
+                price < support
+                and previous_close >= support
+            )
+
+    # =====================================================
+    # TREND
+    # =====================================================
+
+    bullish_trend = (
+        ema20 > ema50
+    )
+
+    bearish_trend = (
+        ema20 < ema50
+    )
+
+    # =====================================================
+    # MOMENTUM
+    # =====================================================
+
+    bullish_momentum = (
+        macd >= macd_signal
+    )
+
+    bearish_momentum = (
+        macd <= macd_signal
+    )
+
+    # =====================================================
+    # CANDLE
+    # =====================================================
+
+    bullish_candle = (
+        price > open_price
+    )
+
+    bearish_candle = (
+        price < open_price
+    )
+
+    # =====================================================
+    # STRONG TREND
+    # =====================================================
+
+    strong_trend = (
+        adx >= STRONG_ADX
+    )
+
+    # =====================================================
+    # RSI
+    # =====================================================
+
+    buy_rsi_ok = (
+        RSI_BUY_MIN
+        <= rsi
+        <= RSI_BUY_MAX
+    )
+
+    sell_rsi_ok = (
+        RSI_SELL_MIN
+        <= rsi
+        <= RSI_SELL_MAX
+    )
+
+    # =====================================================
+    # NORMAL ENTRY
+    # =====================================================
 
     if direction == "BUY":
 
-        trend_ok = ema20 > ema50
-
-        rsi_ok = (
-            RSI_BUY_MIN
-            <= rsi
-            <= RSI_BUY_MAX
+        normal_entry = (
+            bullish_trend
+            and buy_rsi_ok
+            and adx >= MIN_ADX
+            and bullish_momentum
+            and bullish_candle
         )
-
-        momentum_ok = (
-            macd >= macd_signal
-            or (
-                prev is not None
-                and macd > float(prev["MACD"])
-            )
-        )
-
-        candle_ok = (
-            price >= open_price
-        )
-
-    # -----------------------------------------------------
-    # SELL
-    # -----------------------------------------------------
 
     else:
 
-        trend_ok = ema20 < ema50
-
-        rsi_ok = (
-            RSI_SELL_MIN
-            <= rsi
-            <= RSI_SELL_MAX
+        normal_entry = (
+            bearish_trend
+            and sell_rsi_ok
+            and adx >= MIN_ADX
+            and bearish_momentum
+            and bearish_candle
         )
 
-        momentum_ok = (
-            macd <= macd_signal
-            or (
-                prev is not None
-                and macd < float(prev["MACD"])
+    # =====================================================
+    # SMART TREND ENTRY
+    #
+    # در روند قوی، لازم نیست قیمت دقیقاً روی EMA20 باشد.
+    # =====================================================
+
+    if direction == "BUY":
+
+        smart_entry = (
+            bullish_trend
+            and strong_trend
+            and rsi <= 75
+            and bullish_momentum
+            and bullish_candle
+        )
+
+    else:
+
+        smart_entry = (
+            bearish_trend
+            and strong_trend
+            and rsi >= 25
+            and bearish_momentum
+            and bearish_candle
+        )
+
+    # =====================================================
+    # SUPPORT / RESISTANCE FILTER
+    # =====================================================
+
+    sr_ok = True
+
+    sr_reason = "S/R neutral"
+
+    if direction == "BUY":
+
+        # نزدیک مقاومت → ورود خطرناک
+        if near_resistance and not breakout_resistance:
+
+            sr_ok = False
+
+            sr_reason = (
+                "BUY blocked near resistance"
             )
-        )
 
-        candle_ok = (
-            price <= open_price
-        )
+        # نزدیک حمایت → موقعیت بهتر
+        elif near_support:
 
-    setup = (
-        trend_ok
-        and rsi_ok
-        and adx >= MIN_ADX
-        and momentum_ok
-        and candle_ok
-        and entry_not_extended
+            sr_reason = (
+                "BUY near support"
+            )
+
+        # شکست مقاومت
+        elif breakout_resistance:
+
+            sr_reason = (
+                "BUY resistance breakout"
+            )
+
+    else:
+
+        # نزدیک حمایت → ورود خطرناک
+        if near_support and not breakout_support:
+
+            sr_ok = False
+
+            sr_reason = (
+                "SELL blocked near support"
+            )
+
+        # نزدیک مقاومت → موقعیت بهتر
+        elif near_resistance:
+
+            sr_reason = (
+                "SELL near resistance"
+            )
+
+        # شکست حمایت
+        elif breakout_support:
+
+            sr_reason = (
+                "SELL support breakdown"
+            )
+
+    # =====================================================
+    # FINAL ENTRY
+    # =====================================================
+
+    entry_ready = (
+        (normal_entry or smart_entry)
+        and sr_ok
     )
 
-    return setup, {
+    # =====================================================
+    # SCORE
+    # =====================================================
+
+    score = 0
+
+    reasons = []
+
+    if direction == "BUY":
+
+        if bullish_trend:
+
+            score += 25
+            reasons.append(
+                "5M bullish trend"
+            )
+
+        if buy_rsi_ok:
+
+            score += 15
+            reasons.append(
+                "RSI acceptable"
+            )
+
+        if bullish_momentum:
+
+            score += 20
+            reasons.append(
+                "MACD bullish"
+            )
+
+        if strong_trend:
+
+            score += 15
+            reasons.append(
+                "Strong 5M trend"
+            )
+
+        if bullish_candle:
+
+            score += 10
+            reasons.append(
+                "Bullish candle"
+            )
+
+        if near_support:
+
+            score += 10
+            reasons.append(
+                "Near support"
+            )
+
+        if breakout_resistance:
+
+            score += 15
+            reasons.append(
+                "Resistance breakout"
+            )
+
+    else:
+
+        if bearish_trend:
+
+            score += 25
+            reasons.append(
+                "5M bearish trend"
+            )
+
+        if sell_rsi_ok:
+
+            score += 15
+            reasons.append(
+                "RSI acceptable"
+            )
+
+        if bearish_momentum:
+
+            score += 20
+            reasons.append(
+                "MACD bearish"
+            )
+
+        if strong_trend:
+
+            score += 15
+            reasons.append(
+                "Strong 5M trend"
+            )
+
+        if bearish_candle:
+
+            score += 10
+            reasons.append(
+                "Bearish candle"
+            )
+
+        if near_resistance:
+
+            score += 10
+            reasons.append(
+                "Near resistance"
+            )
+
+        if breakout_support:
+
+            score += 15
+            reasons.append(
+                "Support breakdown"
+            )
+
+    # =====================================================
+    # RESULT DATA
+    # =====================================================
+
+    return entry_ready, {
+
         "price": price,
+
         "rsi": rsi,
+
         "adx": adx,
+
         "atr": atr,
+
         "ema20": ema20,
+
         "ema50": ema50,
+
         "macd": macd,
+
         "macd_signal": macd_signal,
-        "distance_from_ema": distance_from_ema,
-        "entry_not_extended": entry_not_extended,
+
+        "support": support,
+
+        "resistance": resistance,
+
+        "distance_to_support": distance_to_support,
+
+        "distance_to_resistance": distance_to_resistance,
+
+        "near_support": near_support,
+
+        "near_resistance": near_resistance,
+
+        "breakout_resistance": breakout_resistance,
+
+        "breakout_support": breakout_support,
+
+        "strong_trend": strong_trend,
+
+        "entry_not_extended": True,
+
+        "sr_reason": sr_reason,
+
+        "score": score,
+
+        "reasons": reasons,
+
         "time": str(last["time"])
     }
 
 
 # =========================================================
-# MAIN SIGNAL
+# MAIN MTF SIGNAL
 # =========================================================
 
 def generate_mtf_signal(
@@ -198,21 +606,38 @@ def generate_mtf_signal(
     df5
 ):
 
-    df30 = add_mtf_indicators(df30)
-    df15 = add_mtf_indicators(df15)
-    df5 = add_mtf_indicators(df5)
+    # =====================================================
+    # INDICATORS
+    # =====================================================
+
+    df30 = add_mtf_indicators(
+        df30
+    )
+
+    df15 = add_mtf_indicators(
+        df15
+    )
+
+    df5 = add_mtf_indicators(
+        df5
+    )
 
     # =====================================================
     # 30M TREND
     # =====================================================
 
-    direction = _trend_30m(df30)
+    direction = _trend_30m(
+        df30
+    )
 
     if direction == "NONE":
 
         return {
+
             "signal": "NO SIGNAL",
+
             "stage": "30M",
+
             "reasons": [
                 "No 30M trend confirmation"
             ]
@@ -222,7 +647,7 @@ def generate_mtf_signal(
     # 15M CONFIRMATION
     # =====================================================
 
-    confirmed, confirmation = _confirm_15m(
+    confirmed, c = _confirm_15m(
         df15,
         direction
     )
@@ -230,38 +655,49 @@ def generate_mtf_signal(
     if not confirmed:
 
         return {
+
             "signal": "NO SIGNAL",
+
             "stage": "15M",
+
             "trend": direction,
+
             "reasons": [
                 "30M trend confirmed",
-                "15M confirmation not ready"
+                "15M confirmation failed"
             ],
-            **confirmation
+
+            **c
         }
 
     # =====================================================
     # 5M ENTRY
     # =====================================================
 
-    setup, entry = _entry_5m(
+    entry_ready, e = _entry_5m(
         df5,
         direction
     )
 
-    if not setup:
+    if not entry_ready:
 
         return {
+
             "signal": "NO SIGNAL",
+
             "stage": "5M",
+
             "trend": direction,
+
             "reasons": [
                 "30M trend confirmed",
                 "15M confirmation confirmed",
-                "5M entry not ready"
+                "5M entry not ready",
+                e["sr_reason"]
             ],
-            **confirmation,
-            **entry
+
+            **c,
+            **e
         }
 
     # =====================================================
@@ -270,40 +706,80 @@ def generate_mtf_signal(
 
     signal = direction
 
-    score = 80
-    confidence = 80
-    quality = "STRONG"
+    score = min(
+        100,
+        max(
+            70,
+            e["score"]
+        )
+    )
 
-    price = entry["price"]
-    atr = entry["atr"]
+    confidence = score
+
+    quality = (
+        "STRONG"
+        if confidence >= 80
+        else "NORMAL"
+    )
+
+    # =====================================================
+    # SL / TP
+    # =====================================================
 
     if signal == "BUY":
 
-        sl = price - (
-            atr * 1.5
+        sl = (
+            e["price"]
+            - e["atr"] * 1.5
         )
 
-        tp1 = price + (
-            atr * 2
+        tp1 = (
+            e["price"]
+            + e["atr"] * 2
         )
 
-        tp2 = price + (
-            atr * 3
+        tp2 = (
+            e["price"]
+            + e["atr"] * 3
         )
 
     else:
 
-        sl = price + (
-            atr * 1.5
+        sl = (
+            e["price"]
+            + e["atr"] * 1.5
         )
 
-        tp1 = price - (
-            atr * 2
+        tp1 = (
+            e["price"]
+            - e["atr"] * 2
         )
 
-        tp2 = price - (
-            atr * 3
+        tp2 = (
+            e["price"]
+            - e["atr"] * 3
         )
+
+    # =====================================================
+    # REASONS
+    # =====================================================
+
+    reasons = [
+        "30M trend confirmed",
+        "15M confirmation confirmed"
+    ]
+
+    reasons.extend(
+        e["reasons"]
+    )
+
+    reasons.append(
+        e["sr_reason"]
+    )
+
+    # =====================================================
+    # FINAL RESULT
+    # =====================================================
 
     return {
 
@@ -315,13 +791,9 @@ def generate_mtf_signal(
 
         "quality": quality,
 
-        "reasons": [
-            "30M trend confirmed",
-            "15M confirmation confirmed",
-            "5M entry setup"
-        ],
+        "reasons": reasons,
 
-        "price": price,
+        "price": e["price"],
 
         "sl": sl,
 
@@ -329,11 +801,21 @@ def generate_mtf_signal(
 
         "tp2": tp2,
 
-        "rsi": entry["rsi"],
+        "rsi": e["rsi"],
 
-        "adx": entry["adx"],
+        "adx": e["adx"],
 
-        "atr": entry["atr"],
+        "atr": e["atr"],
+
+        "support": e["support"],
+
+        "resistance": e["resistance"],
+
+        "distance_to_support":
+            e["distance_to_support"],
+
+        "distance_to_resistance":
+            e["distance_to_resistance"],
 
         "stage": "5M",
 
