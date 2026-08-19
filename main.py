@@ -33,41 +33,117 @@ def format_trade_result(symbol, result):
 
 def check_market(symbol):
     print(f"\n========== {symbol} ==========")
+
     try:
-        df5 = get_market_data(symbol, "5min", 200)
+
+        # ===============================
+        # 5M DATA
+        # ===============================
+
+        df5 = get_market_data(
+            symbol,
+            "5min",
+            200
+        )
+
         if df5 is None or df5.empty:
             print(f"[{symbol}] No 5M data received")
             return
 
-        # Existing trades are evaluated from CLOSED 5M candles only.
-        for trade_result in update_trades(symbol, df5):
-            send_signal(format_trade_result(symbol, trade_result))
 
-        df15 = get_market_data(symbol, "15min", 200)
+        # بررسی معاملات باز
+        for trade_result in update_trades(symbol, df5):
+            send_signal(
+                format_trade_result(
+                    symbol,
+                    trade_result
+                )
+            )
+
+
+        # ===============================
+        # 15M DATA
+        # ===============================
+
+        df15 = get_market_data(
+            symbol,
+            "15min",
+            200
+        )
+
         if df15 is None or df15.empty:
             print(f"[{symbol}] No 15M data received")
             return
 
-        # Only request 1M data after 15M + 5M setup is potentially valid.
-        preliminary = generate_mtf_signal(df15, df5, None)
-        print(f"[{symbol}] MTF preliminary: {preliminary}")
-        if preliminary.get("stage") != "1M":
+
+        # ===============================
+        # 30M DATA
+        # ===============================
+
+        df30 = get_market_data(
+            symbol,
+            "30min",
+            200
+        )
+
+        if df30 is None or df30.empty:
+            print(f"[{symbol}] No 30M data received")
             return
 
-        df1 = get_market_data(symbol, "1min", 100)
-        if df1 is None or df1.empty:
-            return
 
-        result = generate_mtf_signal(df15, df5, df1)
-        print(f"[{symbol}] MTF signal: {result}")
+        # ===============================
+        # MTF SIGNAL
+        # ===============================
 
-        if result.get("signal") in ["BUY", "SELL"]:
+        result = generate_mtf_signal(
+            df30,
+            df15,
+            df5
+        )
+
+
+        print(
+            f"[{symbol}] MTF signal:",
+            result
+        )
+
+
+        # ===============================
+        # SEND SIGNAL
+        # ===============================
+
+        if result.get("signal") in [
+            "BUY",
+            "SELL"
+        ]:
+
             signal_candle_time = df5.iloc[-1]["time"]
-            result["signal_candle_time"] = str(signal_candle_time)
-            if add_trade(symbol, result, signal_candle_time):
-                send_signal(format_signal_message(symbol, result))
+
+            result["signal_candle_time"] = str(
+                signal_candle_time
+            )
+
+
+            if add_trade(
+                symbol,
+                result,
+                signal_candle_time
+            ):
+
+                send_signal(
+                    format_signal_message(
+                        symbol,
+                        result
+                    )
+                )
+
+
     except Exception as e:
-        print(f"[{symbol}] Market check error:", e)
+
+        print(
+            f"[{symbol}] Market check error:",
+            e
+        )
 
 
 def seconds_until_next_candle():
