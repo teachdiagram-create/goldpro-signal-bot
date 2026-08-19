@@ -1,6 +1,8 @@
 import time
 from datetime import datetime
 
+import pandas as pd
+
 from config import MARKETS, TIMEFRAME, CANDLE_MINUTES, CHECK_DELAY_SECONDS
 from data_feed import get_market_data
 from mtf_strategy import generate_mtf_signal
@@ -9,7 +11,7 @@ from trade_tracker import add_trade, update_trades
 
 
 # =========================================================
-# TELEGRAM SIGNAL MESSAGE
+# MESSAGE FORMAT
 # =========================================================
 
 def format_signal_message(symbol, result):
@@ -17,20 +19,19 @@ def format_signal_message(symbol, result):
     signal = result.get("signal", "NO SIGNAL")
     signal_id = result.get("signal_id", "000")
 
-    if signal == "BUY":
-        emoji = "🟢"
-        title = f"BUY SIGNAL #{signal_id}"
+    emoji = (
+        "🟢" if signal == "BUY"
+        else "🔴" if signal == "SELL"
+        else "⚪"
+    )
 
-    elif signal == "SELL":
-        emoji = "🔴"
-        title = f"SELL SIGNAL #{signal_id}"
+    title = (
+        f"{signal} SIGNAL #{signal_id}"
+        if signal in ["BUY", "SELL"]
+        else "WAITING / NO SIGNAL"
+    )
 
-    else:
-        emoji = "⚪"
-        title = "WAITING / NO SIGNAL"
-
-    return f"""
-🟡 <b>GoldPro — {symbol}</b>
+    return f"""🟡 <b>GoldPro — {symbol}</b>
 
 {emoji} <b>{title}</b>
 
@@ -68,8 +69,7 @@ ATR:
 {result.get('atr')}
 
 ⏱ Timeframe:
-30M → 15M → 5M
-""".strip()
+30M → 15M → 5M""".strip()
 
 
 # =========================================================
@@ -105,8 +105,7 @@ def format_trade_result(symbol, result):
         status = outcome
         desc = outcome
 
-    return f"""
-🟡 <b>GoldPro Trade Result — {symbol}</b>
+    return f"""🟡 <b>GoldPro Trade Result — {symbol}</b>
 
 📌 Signal #{result.get('signal_id', '000')}
 
@@ -118,12 +117,139 @@ def format_trade_result(symbol, result):
 {result.get('price')}
 
 📊 Result:
-{desc}
-""".strip()
+{desc}""".strip()
 
 
 # =========================================================
-# CHECK GOLD MARKET
+# BUILD 30M CANDLES FROM CLOSED 15M CANDLES
+# =========================================================
+
+def build_30m_from_15m(df15):
+
+    if df15 is None or df15.empty:
+        return None
+
+    df = df15.copy()
+
+    # -----------------------------------------------------
+    # Make sure time is datetime
+    # -----------------------------------------------------
+
+    df["time"] = pd.to_datetime(
+        df["time"],
+        errors="coerce",
+        utc=True
+    )
+
+    df = df.dropna(
+        subset=["time", "open", "high", "low", "close"]
+    )
+
+    if df.empty:
+        return None
+
+    df = df.sort_values("time").reset_index(drop=True)
+
+    # -----------------------------------------------------
+    # Put candles into 30-minute buckets
+    # -----------------------------------------------------
+
+    df["bucket"] = df["time"].dt.floor("30min")
+
+    # -----------------------------------------------------
+    # A complete 30M candle MUST contain two 15M candles
+    # -----------------------------------------------------
+
+    grouped = (
+        df.groupby("bucket", sort=True)
+        .agg(
+            open=("open", "first"),
+            high=("high", "max"),
+            low=("low", "min"),
+            close=("close", "last"),
+            candle_count=("close", "count")
+        )
+        .reset_index()
+    )
+
+    # Only complete 30M candles
+    grouped = grouped[
+        grouped["candle_count"] >= 2
+    ].copy()
+
+    if grouped.empty:
+        print("[30M] Not enough CLOSED 15M candles")
+        return None
+
+    grouped.rename(
+        columns={"bucket": "time"},
+        inplace=True
+    )
+
+    # -----------------------------------------------------
+    # Volume if available
+    # -----------------------------------------------------
+
+    if "volume" in df.columns:
+
+        volume_df = (
+            df.groupby("bucket", sort=True)["volume"]
+            .sum()
+            .reset_index()
+        )
+
+        volume_df.rename(
+            columns={
+                "bucket": "time",
+                "volume": "volume"
+            },
+            inplace=True
+        )
+
+        grouped = grouped.merge(
+            volume_df,
+            on="time",
+            how="left"
+        )
+
+    # -----------------------------------------------------
+    # Final cleanup
+    # -----------------------------------------------------
+
+    grouped = grouped[
+        [
+            column
+            for column in [
+                "time",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume"
+            ]
+            if column in grouped.columns
+        ]
+    ]
+
+    grouped = grouped.sort_values(
+        "time"
+    ).reset_index(drop=True)
+
+    print(
+        f"[30M] Built from 15M | "
+        f"Latest CLOSED candle: {grouped.iloc[-1]['time']}"
+    )
+
+    print(
+        f"[30M] Latest CLOSED close: "
+        f"{grouped.iloc[-1]['close']}"
+    )
+
+    return grouped
+
+
+# =========================================================
+# MARKET CHECK
 # =========================================================
 
 def check_market(symbol):
@@ -133,7 +259,7 @@ def check_market(symbol):
     try:
 
         # =================================================
-        # 5 MINUTE DATA
+        # 5M DATA
         # =================================================
 
         df5 = get_market_data(
@@ -150,9 +276,8 @@ def check_market(symbol):
 
             return
 
-
         # =================================================
-        # UPDATE EXISTING TRADES
+        # UPDATE OPEN TRADES
         # =================================================
 
         for trade_result in update_trades(
@@ -167,9 +292,8 @@ def check_market(symbol):
                 )
             )
 
-
         # =================================================
-        # 15 MINUTE DATA
+        # 15M DATA
         # =================================================
 
         df15 = get_market_data(
@@ -186,32 +310,26 @@ def check_market(symbol):
 
             return
 
-
         # =================================================
-        # 30 MINUTE DATA
+        # BUILD 30M FROM 15M
         # =================================================
 
-        df30 = get_market_data(
-            symbol,
-            "30min",
-            200
+        df30 = build_30m_from_15m(
+            df15
         )
 
         if df30 is None or df30.empty:
 
             print(
-                f"[{symbol}] No 30M data received"
+                f"[{symbol}] No complete 30M candles available"
             )
 
             return
 
-
         # =================================================
-        # MULTI-TIMEFRAME ANALYSIS
+        # MTF SIGNAL
         #
-        # 30M → MAIN TREND
-        # 15M → CONFIRMATION
-        # 5M  → ENTRY
+        # 30M → 15M → 5M
         # =================================================
 
         result = generate_mtf_signal(
@@ -225,9 +343,8 @@ def check_market(symbol):
             result
         )
 
-
         # =================================================
-        # NEW SIGNAL
+        # SEND SIGNAL
         # =================================================
 
         if result.get("signal") in [
@@ -235,25 +352,21 @@ def check_market(symbol):
             "SELL"
         ]:
 
-            signal_candle_time = (
-                df5.iloc[-1]["time"]
-            )
+            signal_candle_time = df5.iloc[-1]["time"]
 
-            result[
-                "signal_candle_time"
-            ] = str(
+            result["signal_candle_time"] = str(
                 signal_candle_time
             )
 
+            # ---------------------------------------------
+            # Add trade only if it is a new signal
+            # ---------------------------------------------
 
-            added = add_trade(
+            if add_trade(
                 symbol,
                 result,
                 signal_candle_time
-            )
-
-
-            if added:
+            ):
 
                 send_signal(
                     format_signal_message(
@@ -261,7 +374,6 @@ def check_market(symbol):
                         result
                     )
                 )
-
 
     except Exception as e:
 
@@ -272,7 +384,7 @@ def check_market(symbol):
 
 
 # =========================================================
-# WAIT FOR NEXT 5M CANDLE
+# NEXT 5M CANDLE
 # =========================================================
 
 def seconds_until_next_candle():
@@ -294,14 +406,11 @@ def seconds_until_next_candle():
         % candle_seconds
     )
 
-    return (
-        candle_seconds
-        - remainder
-    )
+    return candle_seconds - remainder
 
 
 # =========================================================
-# MAIN LOOP
+# MAIN
 # =========================================================
 
 def main():
@@ -321,7 +430,6 @@ def main():
     print(
         "⏱ Waiting for 5-minute candle close..."
     )
-
 
     while True:
 
@@ -348,14 +456,11 @@ def main():
                 "🕯 5-minute candle closed"
             )
 
-
-            # فقط بازار طلا
             for symbol in MARKETS:
 
                 check_market(
                     symbol
                 )
-
 
         except Exception as e:
 
@@ -368,7 +473,7 @@ def main():
 
 
 # =========================================================
-# START BOT
+# START
 # =========================================================
 
 if __name__ == "__main__":
