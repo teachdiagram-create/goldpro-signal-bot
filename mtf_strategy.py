@@ -1,29 +1,41 @@
 from config import MIN_ADX
 
 # =========================================================
-# GoldPro MTF Strategy v5 - 75% Filter Model
+# GoldPro MTF Strategy V4
 #
-# 30M Trend -> 15M Confirmation -> 5M Entry
+# 30M Trend → 15M Confirmation → 5M Entry
 #
-# هدف این نسخه:
-# - جلوگیری از فیلتر شدن بیش از حد سیگنال‌ها
-# - صدور سیگنال وقتی حداقل 6 فیلتر از 8 فیلتر (75%) تایید باشند
-# - ثبت وضعیت تک تک فیلترها برای بررسی عملکرد واقعی
-# - Support/Resistance فقط اطلاعات تحلیلی است و فیلتر اجباری نیست
+# 8 Filters
+# Minimum score: 70%
+#
+# 6/8 = 75%  -> SIGNAL
+# 5/8 = 62.5% -> NO SIGNAL
 # =========================================================
 
-RSI_BUY_MIN = 35
-RSI_BUY_MAX = 80
-RSI_SELL_MIN = 20
-RSI_SELL_MAX = 65
 
-STRONG_ADX = 35
-MAX_ENTRY_DISTANCE_ATR = 2.0
-SR_LOOKBACK = 50
+# ---------------------------------------------------------
+# SETTINGS
+# ---------------------------------------------------------
 
-TOTAL_FILTERS = 8
-MIN_FILTERS = 6
+MIN_SCORE_PERCENT = 70
 
+RSI_BUY_MIN = 40
+RSI_BUY_MAX = 75
+
+RSI_SELL_MIN = 25
+RSI_SELL_MAX = 60
+
+ATR_SL = 1.5
+ATR_TP1 = 2.0
+ATR_TP2 = 3.0
+
+RESISTANCE_BUFFER_ATR = 0.35
+SUPPORT_BUFFER_ATR = 0.35
+
+
+# =========================================================
+# HELPERS
+# =========================================================
 
 def _latest(df):
     return df.iloc[-1]
@@ -34,168 +46,312 @@ def add_mtf_indicators(df):
     return add_indicators(df.copy())
 
 
-def _support_resistance(df):
-    """Use previous candles for S/R so current candle cannot move its own level."""
-    if df is None or df.empty:
-        return None, None
+# =========================================================
+# BUILD 30M FROM 15M
+# =========================================================
 
-    lookback = min(SR_LOOKBACK + 1, len(df))
-    recent = df.tail(lookback).iloc[:-1]
+def build_30m_from_15m(df15):
 
-    if recent.empty:
-        return None, None
+    df = df15.copy()
 
-    return float(recent["low"].min()), float(recent["high"].max())
+    df["time"] = df["time"].astype(str)
 
+    temp = df.copy()
+
+    temp["time"] = __import__("pandas").to_datetime(
+        temp["time"],
+        errors="coerce",
+        utc=True
+    )
+
+    temp = temp.set_index("time")
+
+    df30 = temp.resample("30min").agg({
+        "open": "first",
+        "high": "max",
+        "low": "min",
+        "close": "last"
+    }).dropna().reset_index()
+
+    print(
+        "[30M] Built from 15M | Latest CLOSED candle:",
+        df30.iloc[-1]["time"]
+    )
+
+    print(
+        "[30M] Latest CLOSED close:",
+        df30.iloc[-1]["close"]
+    )
+
+    return df30
+
+
+# =========================================================
+# 30M TREND
+# =========================================================
 
 def _trend_30m(df30):
+
+    df30 = add_mtf_indicators(df30)
+
     last = _latest(df30)
+
     ema20 = float(last["EMA20"])
     ema50 = float(last["EMA50"])
     adx = float(last["ADX"])
 
     if ema20 > ema50 and adx >= MIN_ADX:
         return "BUY"
+
     if ema20 < ema50 and adx >= MIN_ADX:
         return "SELL"
+
     return "NONE"
 
 
-def _confirm_15m(df15, direction):
+# =========================================================
+# 15M CONFIRMATION
+# =========================================================
+
+def _confirmation_15m(df15, direction):
+
+    df15 = add_mtf_indicators(df15)
+
     last = _latest(df15)
+
     ema20 = float(last["EMA20"])
     ema50 = float(last["EMA50"])
     adx = float(last["ADX"])
 
-    confirmed = (
-        ema20 > ema50 if direction == "BUY" else ema20 < ema50
-    ) and adx >= MIN_ADX
+    if direction == "BUY":
+
+        confirmed = (
+            ema20 > ema50
+            and adx >= MIN_ADX
+        )
+
+    else:
+
+        confirmed = (
+            ema20 < ema50
+            and adx >= MIN_ADX
+        )
 
     return confirmed, {
         "ema20_15": ema20,
         "ema50_15": ema50,
         "adx_15": adx,
-        "time_15": str(last["time"]),
+        "time_15": str(last["time"])
     }
 
 
-def _entry_5m(df5, direction):
+# =========================================================
+# SUPPORT / RESISTANCE
+# =========================================================
+
+def _support_resistance(df5):
+
+    lookback = min(50, len(df5))
+
+    recent = df5.iloc[-lookback:]
+
+    support = float(recent["low"].min())
+    resistance = float(recent["high"].max())
+
+    return support, resistance
+
+
+# =========================================================
+# 5M FILTERS
+# =========================================================
+
+def _evaluate_5m(df5, direction):
+
+    df5 = add_mtf_indicators(df5)
+
     last = _latest(df5)
-    prev = df5.iloc[-2] if len(df5) >= 2 else None
 
     price = float(last["close"])
-    open_price = float(last["open"])
+    open_ = float(last["open"])
+
     ema20 = float(last["EMA20"])
     ema50 = float(last["EMA50"])
+
     rsi = float(last["RSI"])
     adx = float(last["ADX"])
     atr = float(last["ATR"])
+
     macd = float(last["MACD"])
     macd_signal = float(last["MACD_SIGNAL"])
 
-    bullish = direction == "BUY"
+    support, resistance = _support_resistance(df5)
 
-    # 1) 5M EMA trend
-    f_ema = ema20 > ema50 if bullish else ema20 < ema50
+    # -----------------------------------------------------
+    # FILTER 3
+    # 5M EMA TREND
+    # -----------------------------------------------------
 
-    # 2) ADX trend strength
-    f_adx = adx >= MIN_ADX
+    if direction == "BUY":
+        ema_trend = ema20 > ema50
+    else:
+        ema_trend = ema20 < ema50
 
-    # 3) RSI: broad enough to avoid rejecting strong trends at 70+
-    f_rsi = (
-        RSI_BUY_MIN <= rsi <= RSI_BUY_MAX
-        if bullish
-        else RSI_SELL_MIN <= rsi <= RSI_SELL_MAX
+    # -----------------------------------------------------
+    # FILTER 4
+    # RSI
+    # -----------------------------------------------------
+
+    if direction == "BUY":
+
+        rsi_ok = (
+            RSI_BUY_MIN
+            <= rsi
+            <= RSI_BUY_MAX
+        )
+
+    else:
+
+        rsi_ok = (
+            RSI_SELL_MIN
+            <= rsi
+            <= RSI_SELL_MAX
+        )
+
+    # -----------------------------------------------------
+    # FILTER 5
+    # ADX
+    # -----------------------------------------------------
+
+    adx_ok = adx >= MIN_ADX
+
+    # -----------------------------------------------------
+    # FILTER 6
+    # MACD
+    # -----------------------------------------------------
+
+    if direction == "BUY":
+
+        macd_ok = (
+            macd >= macd_signal
+            or macd > 0
+        )
+
+    else:
+
+        macd_ok = (
+            macd <= macd_signal
+            or macd < 0
+        )
+
+    # -----------------------------------------------------
+    # FILTER 7
+    # CANDLE
+    # -----------------------------------------------------
+
+    if direction == "BUY":
+
+        candle_ok = (
+            close_is_bullish(open_, price)
+        )
+
+    else:
+
+        candle_ok = (
+            close_is_bearish(open_, price)
+        )
+
+    # -----------------------------------------------------
+    # SUPPORT / RESISTANCE
+    # -----------------------------------------------------
+
+    distance_to_support = abs(
+        price - support
     )
 
-    # 4) MACD direction
-    f_macd = macd >= macd_signal if bullish else macd <= macd_signal
-
-    # 5) Current candle direction
-    f_candle = price > open_price if bullish else price < open_price
-
-    # 6) Momentum vs previous candle
-    f_momentum = True
-    if prev is not None:
-        prev_close = float(prev["close"])
-        f_momentum = price >= prev_close if bullish else price <= prev_close
-
-    # 7) Entry context: price should be on the correct side of EMA20
-    f_context = price >= ema20 if bullish else price <= ema20
-
-    # 8) Not excessively extended from EMA20.
-    #    This is intentionally generous (2 ATR) so strong trends can still enter.
-    distance_from_ema = abs(price - ema20)
-    f_not_extended = distance_from_ema <= atr * MAX_ENTRY_DISTANCE_ATR
-
-    filters = {
-        "30M Trend": True,  # supplied by caller; direction already confirms it
-        "15M Confirmation": True,  # supplied by caller
-        "5M EMA Trend": f_ema,
-        "ADX": f_adx,
-        "RSI": f_rsi,
-        "MACD": f_macd,
-        "5M Candle": f_candle,
-        "Momentum": f_momentum,
-    }
-
-    # The entry-context and extension checks are diagnostic filters.
-    # They are included in the total 8 by replacing candle/momentum only when needed.
-    # To keep exactly 8 filters, use this set for scoring:
-    score_filters = {
-        "30M Trend": True,
-        "15M Confirmation": True,
-        "5M EMA Trend": f_ema,
-        "ADX": f_adx,
-        "RSI": f_rsi,
-        "MACD": f_macd,
-        "5M Candle": f_candle,
-        "Entry Context": f_context and f_not_extended,
-    }
-
-    passed = sum(1 for value in score_filters.values() if value)
-    confidence = round((passed / TOTAL_FILTERS) * 100, 1)
-
-    support, resistance = _support_resistance(df5)
-    distance_to_support = price - support if support is not None else None
-    distance_to_resistance = resistance - price if resistance is not None else None
+    distance_to_resistance = abs(
+        resistance - price
+    )
 
     near_support = (
-        distance_to_support is not None and distance_to_support <= atr * 0.5
+        distance_to_support
+        <= atr * SUPPORT_BUFFER_ATR
     )
+
     near_resistance = (
-        distance_to_resistance is not None and distance_to_resistance <= atr * 0.5
+        distance_to_resistance
+        <= atr * RESISTANCE_BUFFER_ATR
     )
 
-    # Informational breakout checks use the previous S/R levels.
+    # -----------------------------------------------------
+    # BREAKOUT DETECTION
+    # -----------------------------------------------------
+
     breakout_resistance = (
-        resistance is not None and price > resistance
+        price > resistance
     )
+
     breakout_support = (
-        support is not None and price < support
+        price < support
     )
 
-    passed_names = [name for name, ok in score_filters.items() if ok]
-    failed_names = [name for name, ok in score_filters.items() if not ok]
+    # -----------------------------------------------------
+    # FILTER 8
+    # ENTRY CONTEXT
+    #
+    # Important:
+    # Strong trend should NOT be blocked simply because
+    # price is close to resistance/support.
+    # A breakout is considered valid.
+    # -----------------------------------------------------
 
-    reasons = [
-        f"Filters: {passed}/{TOTAL_FILTERS} ({confidence:.0f}%)",
-        *[f"OK: {name}" for name in passed_names],
-        *[f"WAIT: {name}" for name in failed_names],
-    ]
+    if direction == "BUY":
 
-    entry_ready = passed >= MIN_FILTERS
+        if breakout_resistance:
+            entry_context = True
 
-    if passed == 8:
-        quality = "VERY STRONG"
-    elif passed == 7:
-        quality = "STRONG"
-    elif passed == 6:
-        quality = "NORMAL"
+        elif near_resistance:
+            entry_context = False
+
+        else:
+            entry_context = True
+
     else:
-        quality = "WEAK"
 
-    return entry_ready, {
+        if breakout_support:
+            entry_context = True
+
+        elif near_support:
+            entry_context = False
+
+        else:
+            entry_context = True
+
+    # -----------------------------------------------------
+    # EXTENSION
+    # -----------------------------------------------------
+
+    distance_from_ema = abs(
+        price - ema20
+    )
+
+    entry_not_extended = (
+        distance_from_ema <= atr * 2.0
+    )
+
+    # -----------------------------------------------------
+    # FILTER LIST
+    # -----------------------------------------------------
+
+    filters = {
+        "5M EMA Trend": ema_trend,
+        "RSI": rsi_ok,
+        "ADX": adx_ok,
+        "MACD": macd_ok,
+        "5M Candle": candle_ok,
+        "Entry Context": entry_context
+    }
+
+    return {
         "price": price,
         "rsi": rsi,
         "adx": adx,
@@ -204,121 +360,373 @@ def _entry_5m(df5, direction):
         "ema50": ema50,
         "macd": macd,
         "macd_signal": macd_signal,
+
         "support": support,
         "resistance": resistance,
-        "distance_to_support": distance_to_support,
-        "distance_to_resistance": distance_to_resistance,
-        "near_support": near_support,
-        "near_resistance": near_resistance,
-        "breakout_resistance": breakout_resistance,
-        "breakout_support": breakout_support,
-        "strong_trend": adx >= STRONG_ADX,
-        "distance_from_ema": distance_from_ema,
-        "entry_not_extended": f_not_extended,
-        "filter_count": passed,
-        "total_filters": TOTAL_FILTERS,
-        "confidence": confidence,
-        "quality": quality,
-        "filters": score_filters,
-        "reasons": reasons,
-        "time": str(last["time"]),
+
+        "distance_to_support":
+            distance_to_support,
+
+        "distance_to_resistance":
+            distance_to_resistance,
+
+        "near_support":
+            near_support,
+
+        "near_resistance":
+            near_resistance,
+
+        "breakout_resistance":
+            breakout_resistance,
+
+        "breakout_support":
+            breakout_support,
+
+        "distance_from_ema":
+            distance_from_ema,
+
+        "entry_not_extended":
+            entry_not_extended,
+
+        "filters":
+            filters,
+
+        "time":
+            str(last["time"])
     }
 
 
+# =========================================================
+# CANDLE HELPERS
+# =========================================================
+
+def close_is_bullish(open_, close):
+    return close > open_
+
+
+def close_is_bearish(open_, close):
+    return close < open_
+
+
+# =========================================================
+# MAIN SIGNAL
+# =========================================================
+
 def generate_mtf_signal(df30, df15, df5):
+
+    # =====================================================
+    # BUILD / PREPARE 30M
+    # =====================================================
+
     df30 = add_mtf_indicators(df30)
-    df15 = add_mtf_indicators(df15)
-    df5 = add_mtf_indicators(df5)
 
-    direction = _trend_30m(df30)
+    # =====================================================
+    # 30M TREND
+    # =====================================================
 
-    if direction == "NONE":
+    last30 = _latest(df30)
+
+    ema20_30 = float(last30["EMA20"])
+    ema50_30 = float(last30["EMA50"])
+    adx30 = float(last30["ADX"])
+
+    if (
+        ema20_30 > ema50_30
+        and adx30 >= MIN_ADX
+    ):
+
+        direction = "BUY"
+
+    elif (
+        ema20_30 < ema50_30
+        and adx30 >= MIN_ADX
+    ):
+
+        direction = "SELL"
+
+    else:
+
         return {
             "signal": "NO SIGNAL",
             "stage": "30M",
-            "reasons": ["No 30M trend confirmation"],
+            "reasons": [
+                "No 30M trend confirmation"
+            ]
         }
 
-    confirmed, c = _confirm_15m(df15, direction)
+    # =====================================================
+    # 15M CONFIRMATION
+    # =====================================================
 
-    if not confirmed:
+    confirmation, c15 = _confirmation_15m(
+        df15,
+        direction
+    )
+
+    if not confirmation:
+
         return {
             "signal": "NO SIGNAL",
             "stage": "15M",
             "trend": direction,
             "reasons": [
                 "30M trend confirmed",
-                "15M confirmation failed",
+                "15M confirmation not ready"
             ],
-            **c,
+            **c15
         }
 
-    entry_ready, e = _entry_5m(df5, direction)
+    # =====================================================
+    # 5M
+    # =====================================================
 
-    if not entry_ready:
+    s = _evaluate_5m(
+        df5,
+        direction
+    )
+
+    filters = s["filters"]
+
+    # =====================================================
+    # 8 FILTER SCORE
+    # =====================================================
+
+    filter_results = {
+
+        "30M Trend":
+            True,
+
+        "15M Confirmation":
+            confirmation,
+
+        "5M EMA Trend":
+            filters["5M EMA Trend"],
+
+        "RSI":
+            filters["RSI"],
+
+        "ADX":
+            filters["ADX"],
+
+        "MACD":
+            filters["MACD"],
+
+        "5M Candle":
+            filters["5M Candle"],
+
+        "Entry Context":
+            filters["Entry Context"]
+    }
+
+    passed = sum(
+        1
+        for value in filter_results.values()
+        if value
+    )
+
+    total = len(filter_results)
+
+    confidence = (
+        passed / total
+    ) * 100
+
+    # =====================================================
+    # QUALITY
+    # =====================================================
+
+    if passed >= 7:
+
+        quality = "STRONG"
+
+    elif passed == 6:
+
+        quality = "NORMAL"
+
+    else:
+
+        quality = "WEAK"
+
+    # =====================================================
+    # REASONS
+    # =====================================================
+
+    reasons = [
+        f"Filters: {passed}/{total} ({confidence:.0f}%)"
+    ]
+
+    for name, value in filter_results.items():
+
+        if value:
+
+            reasons.append(
+                f"OK: {name}"
+            )
+
+        else:
+
+            reasons.append(
+                f"WAIT: {name}"
+            )
+
+    # =====================================================
+    # SIGNAL THRESHOLD
+    #
+    # 70% of 8 = 5.6
+    # Therefore minimum integer = 6
+    # =====================================================
+
+    minimum_filters = 6
+
+    if passed < minimum_filters:
+
         return {
             "signal": "NO SIGNAL",
             "stage": "5M",
             "trend": direction,
-            "reasons": [
-                "30M trend confirmed",
-                "15M confirmation confirmed",
-                *e["reasons"],
-            ],
-            **c,
-            **e,
+
+            "reasons": reasons,
+
+            **c15,
+            **s,
+
+            "filter_count":
+                passed,
+
+            "total_filters":
+                total,
+
+            "confidence":
+                confidence,
+
+            "quality":
+                quality,
+
+            "filters":
+                filter_results
         }
 
+    # =====================================================
+    # FINAL SIGNAL
+    # =====================================================
+
     signal = direction
-    confidence = e["confidence"]
-    score = int(round(confidence))
-    quality = e["quality"]
+
+    price = s["price"]
+    atr = s["atr"]
+
+    # -----------------------------------------------------
+    # BUY
+    # -----------------------------------------------------
 
     if signal == "BUY":
-        sl = e["price"] - e["atr"] * 1.5
-        tp1 = e["price"] + e["atr"] * 2
-        tp2 = e["price"] + e["atr"] * 3
+
+        sl = (
+            price
+            - atr * ATR_SL
+        )
+
+        tp1 = (
+            price
+            + atr * ATR_TP1
+        )
+
+        tp2 = (
+            price
+            + atr * ATR_TP2
+        )
+
+    # -----------------------------------------------------
+    # SELL
+    # -----------------------------------------------------
+
     else:
-        sl = e["price"] + e["atr"] * 1.5
-        tp1 = e["price"] - e["atr"] * 2
-        tp2 = e["price"] - e["atr"] * 3
 
-    reasons = [
-        "30M trend confirmed",
-        "15M confirmation confirmed",
-        *e["reasons"],
-    ]
+        sl = (
+            price
+            + atr * ATR_SL
+        )
 
-    # S/R is diagnostic only in this version.
-    if e["breakout_resistance"] and signal == "BUY":
-        reasons.append("Resistance breakout")
-    elif e["breakout_support"] and signal == "SELL":
-        reasons.append("Support breakdown")
-    elif e["near_resistance"]:
-        reasons.append("Near resistance")
-    elif e["near_support"]:
-        reasons.append("Near support")
+        tp1 = (
+            price
+            - atr * ATR_TP1
+        )
+
+        tp2 = (
+            price
+            - atr * ATR_TP2
+        )
+
+    # =====================================================
+    # FINAL REASONS
+    # =====================================================
+
+    reasons.append(
+        f"FINAL {signal} SIGNAL"
+    )
+
+    # =====================================================
+    # RESULT
+    # =====================================================
 
     return {
-        "signal": signal,
-        "score": score,
-        "confidence": confidence,
-        "quality": quality,
-        "filter_count": e["filter_count"],
-        "total_filters": e["total_filters"],
-        "filters": e["filters"],
-        "reasons": reasons,
-        "price": e["price"],
-        "sl": sl,
-        "tp1": tp1,
-        "tp2": tp2,
-        "rsi": e["rsi"],
-        "adx": e["adx"],
-        "atr": e["atr"],
-        "support": e["support"],
-        "resistance": e["resistance"],
-        "distance_to_support": e["distance_to_support"],
-        "distance_to_resistance": e["distance_to_resistance"],
-        "stage": "5M",
-        "trend": direction,
+
+        "signal":
+            signal,
+
+        "score":
+            passed,
+
+        "confidence":
+            confidence,
+
+        "quality":
+            quality,
+
+        "reasons":
+            reasons,
+
+        "price":
+            price,
+
+        "sl":
+            sl,
+
+        "tp1":
+            tp1,
+
+        "tp2":
+            tp2,
+
+        "rsi":
+            s["rsi"],
+
+        "adx":
+            s["adx"],
+
+        "atr":
+            s["atr"],
+
+        "support":
+            s["support"],
+
+        "resistance":
+            s["resistance"],
+
+        "filter_count":
+            passed,
+
+        "total_filters":
+            total,
+
+        "filters":
+            filter_results,
+
+        "stage":
+            "5M",
+
+        "trend":
+            direction,
+
+        "time":
+            s["time"]
     }
