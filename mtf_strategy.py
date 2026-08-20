@@ -934,7 +934,7 @@ def generate_mtf_signal(df30, df15, df5):
     # NO TREND
     # -----------------------------------------------------
 
-    return {
+       return {
         "signal": "NO SIGNAL",
         "stage": "15M",
         "trend": "NONE",
@@ -945,4 +945,13 @@ def generate_mtf_signal(df30, df15, df5):
             "EMA20 and EMA50 have no clear trend"
         ],
         "price": price,
+        "rsi": rsi,
+        "adx": adx,
+        "atr": atr,
+        "ema20": ema20,
+        "ema50": ema50,
+        "macd": macd,
+        "macd_signal": macd_signal,
+        "time": str(last["time"])
+    }
         
