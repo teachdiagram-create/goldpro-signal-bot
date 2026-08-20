@@ -1108,65 +1108,85 @@ def _build_signal(
     # SELL
     # -----------------------------------------------------
 
-    else:
+    if trend == "SELL":
 
-        sl = (
-            price
-            + atr * SL_ATR_MULTIPLIER
+        (
+            score,
+            filters,
+            reasons,
+            sr,
+            divergence
+        ) = _analyze_sell(
+            prepared5,
+            prepared1
         )
 
-        tp1 = (
-            price
-            - atr * TP1_ATR_MULTIPLIER
+        if score >= MIN_SCORE:
+
+            return _build_signal(
+                "SELL",
+                trend,
+                score,
+                reasons,
+                filters,
+                data,
+                sr,
+                divergence
+            )
+
+        return _build_no_signal(
+            trend,
+            score,
+            reasons,
+            filters,
+            data,
+            sr,
+            divergence
         )
 
-        tp2 = (
-            price
-            - atr * TP2_ATR_MULTIPLIER
-        )
+    # -----------------------------------------------------
+    # NO CLEAR TREND
+    # -----------------------------------------------------
 
-    result = {
-        "signal": signal,
+    return {
+        "signal": "NO SIGNAL",
 
-        "score": score,
+        "stage": "5M",
 
-        "confidence": score,
+        "trend": "NONE",
 
-        "quality": _quality(
-            score
-        ),
+        "score": 0,
 
-        "stage": "1M",
+        "confidence": 0,
 
-        "trend": trend,
+        "quality": "WEAK",
 
-        "price": price,
+        "reasons": [
+            "5M EMA20 / EMA50 have no clear trend"
+        ],
 
-        "sl": sl,
-
-        "tp1": tp1,
-
-        "tp2": tp2,
+        "price": data["price"],
 
         "rsi": data["rsi"],
 
         "adx": data["adx"],
 
-        "atr": atr,
+        "atr": data["atr"],
 
         "ema20": data["ema20"],
 
         "ema50": data["ema50"],
 
-        "macd": data["macd"],
+        "time": data["time"]
+    }
 
-        "macd_signal": data["macd_signal"],
 
-        "divergence": divergence,
+# =========================================================
+# OPTIONAL ALIAS
+#
+# This makes integration easier if we decide later
+# to rename the function.
+# =========================================================
 
-        "filters": filters,
-
-        "time": data["time"],
-
-        "reasons": [
+generate_mtf_signal_v6 = generate_signal_v6
   
