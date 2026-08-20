@@ -978,6 +978,7 @@ def generate_mtf_signal(
             ]
         }
 
+    
     # -----------------------------------------------------
     # PREPARE INDICATORS
     # -----------------------------------------------------
@@ -1045,4 +1046,105 @@ def generate_mtf_signal(
     if trend == "BUY":
 
         (
-   
+            score,
+            filters,
+            reasons,
+            sr,
+            divergence
+        ) = _analyze_buy(
+            df15,
+            df5
+        )
+
+        if score >= MIN_SCORE:
+
+            return _build_signal(
+                "BUY",
+                trend,
+                score,
+                reasons,
+                filters,
+                data,
+                sr,
+                divergence
+            )
+
+        return _build_no_signal(
+            trend,
+            score,
+            reasons,
+            filters,
+            data,
+            sr,
+            divergence
+        )
+
+    # -----------------------------------------------------
+    # SELL
+    # -----------------------------------------------------
+
+    if trend == "SELL":
+
+        (
+            score,
+            filters,
+            reasons,
+            sr,
+            divergence
+        ) = _analyze_sell(
+            df15,
+            df5
+        )
+
+        if score >= MIN_SCORE:
+
+            return _build_signal(
+                "SELL",
+                trend,
+                score,
+                reasons,
+                filters,
+                data,
+                sr,
+                divergence
+            )
+
+        return _build_no_signal(
+            trend,
+            score,
+            reasons,
+            filters,
+            data,
+            sr,
+            divergence
+        )
+
+    # -----------------------------------------------------
+    # NO CLEAR TREND
+    # -----------------------------------------------------
+
+    return {
+        "signal": "NO SIGNAL",
+        "stage": "15M",
+        "trend": "NONE",
+        "score": 0,
+        "confidence": 0,
+        "quality": "WEAK",
+
+        "reasons": [
+            "EMA20 and EMA50 have no clear trend"
+        ],
+
+        "filters": {},
+        "divergence": False,
+
+        "price": data["price"],
+        "rsi": data["rsi"],
+        "adx": data["adx"],
+        "atr": data["atr"],
+        "ema20": data["ema20"],
+        "ema50": data["ema50"],
+        "macd": data["macd"],
+        "macd_signal": data["macd_signal"],
+        "time": data["time"]
+    }
