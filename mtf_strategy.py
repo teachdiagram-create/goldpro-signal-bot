@@ -1,15 +1,15 @@
 # =========================================================
-# GoldPro MTF Strategy V5 - CLEAN
+# GoldPro MTF Strategy V5 - CLEAN FINAL
 #
 # BUY:
-#   1) 15M EMA20 > EMA50 -> bullish trend only
+#   1) 15M EMA20 > EMA50 = bullish trend
 #   2) 5M RSI went below 30 and crossed back above 30
 #   3) Last 5M candle bullish and closes above previous close
 #   4) Price near 5M OR 15M support
 #   5) Bullish RSI divergence = +10 bonus
 #
 # SELL:
-#   1) 15M EMA20 < EMA50 -> bearish trend only
+#   1) 15M EMA20 < EMA50 = bearish trend
 #   2) 5M RSI went above 70 and crossed back below 70
 #   3) Last 5M candle bearish and closes below previous close
 #   4) Price near 5M OR 15M resistance
@@ -17,7 +17,9 @@
 #
 # EMA20 / EMA50 ONLY define trend.
 #
-# Minimum score = 70 / 100
+# MACD and ADX are NOT entry conditions.
+#
+# Minimum score = 70
 # =========================================================
 
 from indicators import add_indicators
@@ -226,10 +228,12 @@ def _find_support(df, lookback):
     if count <= 0:
         return None
 
-    return _safe_float(
-        df.iloc[-count:]["low"].min(),
-        None
-    )
+    try:
+        return float(
+            df.iloc[-count:]["low"].min()
+        )
+    except Exception:
+        return None
 
 
 # =========================================================
@@ -249,10 +253,12 @@ def _find_resistance(df, lookback):
     if count <= 0:
         return None
 
-    return _safe_float(
-        df.iloc[-count:]["high"].max(),
-        None
-    )
+    try:
+        return float(
+            df.iloc[-count:]["high"].max()
+        )
+    except Exception:
+        return None
 
 
 # =========================================================
@@ -399,29 +405,33 @@ def _bullish_divergence(df5):
     first = recent.iloc[:5]
     second = recent.iloc[5:]
 
-    idx1 = first["low"].idxmin()
-    idx2 = second["low"].idxmin()
+    try:
+        idx1 = first["low"].idxmin()
+        idx2 = second["low"].idxmin()
 
-    price_low_1 = _safe_float(
-        first.loc[idx1, "low"]
-    )
+        price_low_1 = _safe_float(
+            first.loc[idx1, "low"]
+        )
 
-    price_low_2 = _safe_float(
-        second.loc[idx2, "low"]
-    )
+        price_low_2 = _safe_float(
+            second.loc[idx2, "low"]
+        )
 
-    rsi_low_1 = _safe_float(
-        first.loc[idx1, "RSI"]
-    )
+        rsi_low_1 = _safe_float(
+            first.loc[idx1, "RSI"]
+        )
 
-    rsi_low_2 = _safe_float(
-        second.loc[idx2, "RSI"]
-    )
+        rsi_low_2 = _safe_float(
+            second.loc[idx2, "RSI"]
+        )
 
-    return (
-        price_low_2 < price_low_1
-        and rsi_low_2 > rsi_low_1
-    )
+        return (
+            price_low_2 < price_low_1
+            and rsi_low_2 > rsi_low_1
+        )
+
+    except Exception:
+        return False
 
 
 # =========================================================
@@ -438,29 +448,33 @@ def _bearish_divergence(df5):
     first = recent.iloc[:5]
     second = recent.iloc[5:]
 
-    idx1 = first["high"].idxmax()
-    idx2 = second["high"].idxmax()
+    try:
+        idx1 = first["high"].idxmax()
+        idx2 = second["high"].idxmax()
 
-    price_high_1 = _safe_float(
-        first.loc[idx1, "high"]
-    )
+        price_high_1 = _safe_float(
+            first.loc[idx1, "high"]
+        )
 
-    price_high_2 = _safe_float(
-        second.loc[idx2, "high"]
-    )
+        price_high_2 = _safe_float(
+            second.loc[idx2, "high"]
+        )
 
-    rsi_high_1 = _safe_float(
-        first.loc[idx1, "RSI"]
-    )
+        rsi_high_1 = _safe_float(
+            first.loc[idx1, "RSI"]
+        )
 
-    rsi_high_2 = _safe_float(
-        second.loc[idx2, "RSI"]
-    )
+        rsi_high_2 = _safe_float(
+            second.loc[idx2, "RSI"]
+        )
 
-    return (
-        price_high_2 > price_high_1
-        and rsi_high_2 < rsi_high_1
-    )
+        return (
+            price_high_2 > price_high_1
+            and rsi_high_2 < rsi_high_1
+        )
+
+    except Exception:
+        return False
 
 
 # =========================================================
@@ -492,14 +506,10 @@ def _analyze_buy(df15, df5):
     )
 
     score = 0
-
     reasons = []
-
     filters = {}
 
-    # -----------------------------------------------------
-    # TREND = 20 POINTS
-    # -----------------------------------------------------
+    # Trend = 20 points
 
     filters["Trend"] = trend_ok
 
@@ -513,9 +523,7 @@ def _analyze_buy(df15, df5):
             "WAIT: EMA trend"
         )
 
-    # -----------------------------------------------------
-    # RSI REVERSAL = 35 POINTS
-    # -----------------------------------------------------
+    # RSI reversal = 35 points
 
     filters["RSI Reversal"] = rsi_ok
 
@@ -529,9 +537,7 @@ def _analyze_buy(df15, df5):
             "WAIT: RSI reversal"
         )
 
-    # -----------------------------------------------------
-    # CANDLE = 20 POINTS
-    # -----------------------------------------------------
+    # Candle = 20 points
 
     filters["5M Candle"] = candle_ok
 
@@ -545,9 +551,7 @@ def _analyze_buy(df15, df5):
             "WAIT: bullish 5M candle"
         )
 
-    # -----------------------------------------------------
-    # SUPPORT = 15 POINTS
-    # -----------------------------------------------------
+    # Support = 15 points
 
     filters["Support"] = support_ok
 
@@ -561,9 +565,7 @@ def _analyze_buy(df15, df5):
             "WAIT: 5M/15M support"
         )
 
-    # -----------------------------------------------------
-    # DIVERGENCE = +10 BONUS
-    # -----------------------------------------------------
+    # Divergence = 10 bonus
 
     filters["RSI Divergence"] = divergence
 
@@ -615,14 +617,10 @@ def _analyze_sell(df15, df5):
     )
 
     score = 0
-
     reasons = []
-
     filters = {}
 
-    # -----------------------------------------------------
-    # TREND = 20 POINTS
-    # -----------------------------------------------------
+    # Trend = 20 points
 
     filters["Trend"] = trend_ok
 
@@ -636,9 +634,7 @@ def _analyze_sell(df15, df5):
             "WAIT: EMA trend"
         )
 
-    # -----------------------------------------------------
-    # RSI REVERSAL = 35 POINTS
-    # -----------------------------------------------------
+    # RSI reversal = 35 points
 
     filters["RSI Reversal"] = rsi_ok
 
@@ -652,9 +648,7 @@ def _analyze_sell(df15, df5):
             "WAIT: RSI reversal"
         )
 
-    # -----------------------------------------------------
-    # CANDLE = 20 POINTS
-    # -----------------------------------------------------
+    # Candle = 20 points
 
     filters["5M Candle"] = candle_ok
 
@@ -668,9 +662,7 @@ def _analyze_sell(df15, df5):
             "WAIT: bearish 5M candle"
         )
 
-    # -----------------------------------------------------
-    # RESISTANCE = 15 POINTS
-    # -----------------------------------------------------
+    # Resistance = 15 points
 
     filters["Resistance"] = resistance_ok
 
@@ -684,9 +676,7 @@ def _analyze_sell(df15, df5):
             "WAIT: 5M/15M resistance"
         )
 
-    # -----------------------------------------------------
-    # DIVERGENCE = +10 BONUS
-    # -----------------------------------------------------
+    # Divergence = 10 bonus
 
     filters["RSI Divergence"] = divergence
 
@@ -789,20 +779,15 @@ def _build_no_signal(
         "signal": "NO SIGNAL",
         "stage": "5M",
         "trend": trend,
-
         "score": score,
         "confidence": score,
-
-        "quality": _quality(
-            score
-        ),
+        "quality": _quality(score),
 
         "reasons": [
             f"Score: {score}/100"
         ] + reasons,
 
         "filters": filters,
-
         "divergence": divergence
     }
 
@@ -847,7 +832,6 @@ def _build_signal(
 ):
 
     price = data["price"]
-
     atr = data["atr"]
 
     if atr <= 0:
@@ -864,9 +848,7 @@ def _build_signal(
             divergence
         )
 
-    # -----------------------------------------------------
-    # BUY TP / SL
-    # -----------------------------------------------------
+    # BUY
 
     if signal == "BUY":
 
@@ -885,9 +867,7 @@ def _build_signal(
             + atr * TP2_ATR_MULTIPLIER
         )
 
-    # -----------------------------------------------------
-    # SELL TP / SL
-    # -----------------------------------------------------
+    # SELL
 
     else:
 
@@ -908,45 +888,29 @@ def _build_signal(
 
     result = {
         "signal": signal,
-
         "score": score,
-
         "confidence": score,
-
-        "quality": _quality(
-            score
-        ),
-
+        "quality": _quality(score),
         "stage": "5M",
-
         "trend": trend,
 
         "price": price,
-
         "sl": sl,
-
         "tp1": tp1,
-
         "tp2": tp2,
 
         "rsi": data["rsi"],
-
         "adx": data["adx"],
-
         "atr": atr,
 
         "ema20": data["ema20"],
-
         "ema50": data["ema50"],
 
         "macd": data["macd"],
-
         "macd_signal": data["macd_signal"],
 
         "divergence": divergence,
-
         "filters": filters,
-
         "time": data["time"],
 
         "reasons": [
@@ -1015,7 +979,7 @@ def generate_mtf_signal(
         }
 
     # -----------------------------------------------------
-    # INDICATORS
+    # PREPARE INDICATORS
     # -----------------------------------------------------
 
     prepared30 = _prepare(
@@ -1031,4 +995,54 @@ def generate_mtf_signal(
     )
 
     if (
-        p
+        prepared30 is None
+        or prepared15 is None
+        or prepared5 is None
+    ):
+
+        return {
+            "signal": "NO SIGNAL",
+            "stage": "DATA",
+            "trend": "NONE",
+            "score": 0,
+            "confidence": 0,
+            "quality": "WEAK",
+            "reasons": [
+                "Indicator calculation failed"
+            ]
+        }
+
+    # -----------------------------------------------------
+    # USE PREPARED DATA
+    # -----------------------------------------------------
+
+    df30 = prepared30
+    df15 = prepared15
+    df5 = prepared5
+
+    # -----------------------------------------------------
+    # COMMON DATA
+    # -----------------------------------------------------
+
+    data = _common_data(
+        df5
+    )
+
+    # -----------------------------------------------------
+    # TREND
+    #
+    # EMA20 / EMA50 ONLY
+    # -----------------------------------------------------
+
+    trend = _get_trend_15m(
+        df15
+    )
+
+    # -----------------------------------------------------
+    # BUY
+    # -----------------------------------------------------
+
+    if trend == "BUY":
+
+        (
+   
