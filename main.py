@@ -498,3 +498,422 @@ class APIManager:
         }
 
     def should_send_signal(self, symbol_key, signal_type):
+        current_time = time.time()
+        key = f"{symbol_key}_{signal_type}"
+        last_time = self.last_signal_time.get(key, 0)
+
+        if current_time - last_time < 1800:
+            return False
+
+        self.last_signal_time[key] = current_time
+        return True
+
+    def should_check_trend(self, symbol_key):
+        """بررسی آیا زمان چک کردن روند رسیده؟"""
+        now = time.time()
+        last_check = self.last_trend_check.get(symbol_key, 0)
+
+        if now - last_check >= TREND_CHECK_INTERVAL * 60:
+            self.last_trend_check[symbol_key] = now
+            return True
+        return False
+
+    def should_check_signal(self, symbol_key):
+        """بررسی آیا باید سیگنال ۱ دقیقه‌ای را چک کنیم؟"""
+        # فقط اگر روند قوی باشد
+        trend_info = self.trend_state.get(symbol_key, {})
+        if trend_info.get('is_strong', False):
+            return True
+        return False
+
+def send_telegram_message(text):
+    """ارسال پیام به تلگرام"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        logger.warning("تنظیمات تلگرام کامل نیست")
+        return False
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}
+
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code != 200:
+            logger.error(f"خطا در ارسال تلگرام: {response.text}")
+        return response.status_code == 200
+    except Exception as e:
+        logger.error(f"استثنا در ارسال تلگرام: {e}")
+        return False
+
+def get_market_data(api_manager, symbol_key, interval="5min", outputsize=100):
+    """دریافت داده بازار"""
+    if not api_manager.can_make_request():
+        return None
+
+    symbol = SYMBOLS[symbol_key]["symbol"]
+    url = "https://api.twelvedata.com/time_series"
+    params = {
+        "symbol": symbol,
+        "interval": interval,
+        "outputsize": outputsize,
+      "apikey": API_KEY
+    }
+
+    try:
+        response = requests.get(url, params=params, timeout=15)
+
+        if response.status_code == 200:
+            api_manager.record_request()
+            data = response.json()
+
+            if "values" in data:
+                return data["values"]
+            else:
+                logger.error(f"خطای API برای {symbol}: {data}")
+                return None
+        elif response.status_code == 429:
+            logger.error("Rate Limit Exceeded!")
+            time.sleep(60)
+            return None
+        else:
+            logger.error(f"خطای HTTP: {response.status_code}")
+            return None
+
+    except Exception as e:
+        logger.error(f"خطا در دریافت داده {symbol}: {e}")
+        return None
+
+def analyze_trend(data_5min, symbol_key):
+    """تحلیل روند در تایم‌فریم ۵ دقیقه"""
+    closes = [float(item["close"]) for item in reversed(data_5min)]
+    highs = [float(item["high"]) for item in reversed(data_5min)]
+    lows = [float(item["low"]) for item in reversed(data_5min)]
+
+    ema_fast = TechnicalIndicators.calculate_ema(closes, EMA_FAST)
+    ema_slow = TechnicalIndicators.calculate_ema(closes, EMA_SLOW)
+
+    adx_result = TechnicalIndicators.calculate_adx(highs, lows, closes, ADX_PERIOD)
+    if adx_result:
+        adx_values, plus_di, minus_di = adx_result
+        current_adx = adx_values[-1] if adx_values else 0
+    else:
+        current_adx = 0
+
+    if not ema_fast or not ema_slow:
+        return None, None, None, None
+
+    current_ema_fast = ema_fast[-1]
+    current_ema_slow = ema_slow[-1]
+    prev_ema_fast = ema_fast[-2] if len(ema_fast) > 1 else current_ema_fast
+    prev_ema_slow = ema_slow[-2] if len(ema_slow) > 1 else current_ema_slow
+
+    trend = "NEUTRAL"
+    trend_strength = 0
+
+    if current_ema_fast > current_ema_slow and current_adx > ADX_TREND_LEVEL:
+        trend = "UP"
+        trend_strength = min(100, (current_adx - ADX_TREND_LEVEL) * 2)
+    elif current_ema_fast < current_ema_slow and current_adx > ADX_TREND_LEVEL:
+        trend = "DOWN"
+        trend_strength = min(100, (current_adx - ADX_TREND_LEVEL) * 2)
+
+    reversal = False
+    if trend == "UP" and prev_ema_fast <= prev_ema_slow:
+        reversal = True
+    elif trend == "DOWN" and prev_ema_fast >= prev_ema_slow:
+        reversal = True
+
+    # بررسی قدرت روند
+    is_strong = current_adx > SYMBOL_PARAMS[symbol_key]["STRONG_TREND_ADX"]
+
+    return trend, trend_strength, reversal, current_adx, is_strong
+
+def find_entry_signal(data_1min, trend, symbol_key):
+    """یافتن سیگنال ورود در تایم‌فریم ۱ دقیقه"""
+    closes = [float(item["close"]) for item in reversed(data_1min)]
+    highs = [float(item["high"]) for item in reversed(data_1min)]
+    lows = [float(item["low"]) for item in reversed(data_1min)]
+
+    params = SYMBOL_PARAMS[symbol_key]
+
+    rsi_values = TechnicalIndicators.calculate_rsi(closes, RSI_PERIOD)
+    macd_result = TechnicalIndicators.calculate_macd(closes)
+    atr_values = TechnicalIndicators.calculate_atr(highs, lows, closes, ATR_PERIOD)
+
+    if not rsi_values or not atr_values or not macd_result[0]:
+        return None, None, None, None
+
+    current_rsi = rsi_values[-1]
+    current_atr = atr_values[-1]
+    current_price = closes[-1]
+
+    macd_line, signal_line, histogram = macd_result
+    current_macd = macd_line[-1]
+    current_signal = signal_line[-1]
+    current_histogram = histogram[-1]
+    prev_histogram = histogram[-2] if len(histogram) > 1 else 0
+
+    signal = None
+    stop_loss = None
+    take_profit = None
+    confidence = 0
+
+    if trend == "UP":
+        if current_rsi < params['RSI_OVERSOLD'] and current_macd > current_signal and current_histogram > prev_histogram:
+            signal = "BUY"
+            stop_loss = current_price - (current_atr * params['ATR_MULTIPLIER_SL'])
+            take_profit = current_price + (current_atr * params['ATR_MULTIPLIER_TP'])
+            confidence = min(90, 50 + (params['RSI_OVERSOLD'] - current_rsi))
+        elif current_rsi > params['RSI_OVERSOLD'] and rsi_values[-2] <= params['RSI_OVERSOLD']:
+            signal = "BUY"
+            stop_loss = current_price - (current_atr * params['ATR_MULTIPLIER_SL'])
+            take_profit = current_price + (current_atr * params['ATR_MULTIPLIER_TP'])
+            confidence = params['MIN_CONFIDENCE']
+
+    elif trend == "DOWN":
+        if current_rsi > params['RSI_OVERBOUGHT'] and current_macd < current_signal and current_histogram < prev_histogram:
+            signal = "SELL"
+            stop_loss = current_price + (current_atr * params['ATR_MULTIPLIER_SL'])
+            take_profit = current_price - (current_atr * params['ATR_MULTIPLIER_TP'])
+            confidence = min(90, 50 + (current_rsi - params['RSI_OVERBOUGHT']))
+        elif current_rsi < params['RSI_OVERBOUGHT'] and rsi_values[-2] >= params['RSI_OVERBOUGHT']:
+            signal = "SELL"
+            stop_loss = current_price + (current_atr * params['ATR_MULTIPLIER_SL'])
+            take_profit = current_price - (current_atr * params['ATR_MULTIPLIER_TP'])
+            confidence = params['MIN_CONFIDENCE']
+
+    if confidence < params['MIN_CONFIDENCE']:
+        return None, None, None, None
+
+    return signal, stop_loss, take_profit, confidence
+
+def is_market_open(symbol_key):
+    """بررسی باز بودن بازار"""
+    now = datetime.now()
+
+    if symbol_key == "BITCOIN":
+        return True
+
+    if now.weekday() == 5:
+        return False
+    if now.weekday() == 6:
+        return False
+    if now.weekday() == 4 and now.hour >= 22:
+        return False
+    return True
+
+def process_symbol_trend(api_manager, symbol_key):
+    """بررسی روند یک نماد در تایم‌فریم ۵ دقیقه"""
+    symbol_info = SYMBOLS[symbol_key]
+
+    if not is_market_open(symbol_key):
+        return
+
+    # دریافت داده ۵ دقیقه
+    data_5min = get_market_data(api_manager, symbol_key, "5min", 100)
+    if not data_5min:
+        return
+
+    # به‌روزرسانی وضعیت سیگنال‌ها
+    current_price = float(data_5min[0]["close"])
+    api_manager.signal_tracker.update_signal_status(symbol_key, current_price)
+
+    # تحلیل روند
+    trend, trend_strength, reversal, adx, is_strong = analyze_trend(data_5min, symbol_key)
+
+    if trend is None:
+        return
+
+    # ذخیره وضعیت روند
+    api_manager.trend_state[symbol_key] = {
+        'trend': trend,
+        'strength': trend_strength,
+        'adx': adx,
+        'is_strong': is_strong,
+        'last_update': datetime.now().strftime('%H:%M:%S')
+    }
+
+    logger.info(f"{symbol_info['name']}: روند {trend} | قدرت {trend_strength:.0f}٪ | ADX {adx:.1f} | قوی: {is_strong}")
+
+    # اگر روند برگشت کرده، اطلاع بده
+    if reversal:
+        message = (
+            f"🔄 <b>برگشت روند {symbol_info['name']}!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"{symbol_info['emoji']} نماد: {symbol_info['name']}\n"
+            f"📉 جهت جدید: {'صعودی 📈' if trend == 'UP' else 'نزولی 📉'}\n"
+            f"💰 قیمت: ${current_price:.2f}\n"
+            f"📊 ADX: {adx:.1f}\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"⚠️ مراقب تغییر روند باشید\n"
+            f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        send_telegram_message(message)
+
+def process_symbol_signal(api_manager, symbol_key):
+    """بررسی سیگنال در تایم‌فریم ۱ دقیقه"""
+    symbol_info = SYMBOLS[symbol_key]
+    trend_info = api_manager.trend_state.get(symbol_key, {})
+
+    if not trend_info.get('is_strong', False):
+        return
+
+    if trend_info.get('trend') == "NEUTRAL":
+        return
+
+    # دریافت داده ۱ دقیقه
+    data_1min = get_market_data(api_manager, symbol_key, "1min", 100)
+    if not data_1min:
+        return
+
+    # به‌روزرسانی وضعیت سیگنال‌ها با قیمت لحظه‌ای
+    current_price = float(data_1min[0]["close"])
+    api_manager.signal_tracker.update_signal_status(symbol_key, current_price)
+
+    # یافتن سیگنال
+    signal, stop_loss, take_profit, confidence = find_entry_signal(
+        data_1min, 
+        trend_info['trend'], 
+        symbol_key
+    )
+
+    if signal and api_manager.should_send_signal(symbol_key, signal):
+        # ثبت سیگنال
+        signal_data = api_manager.signal_tracker.add_signal(
+            symbol_key=symbol_key,
+            signal_type=signal,
+            entry_price=current_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            confidence=confidence,
+            trend=trend_info['trend'],
+            trend_strength=trend_info['strength']
+        )
+
+        # ارسال سیگنال
+        if signal == "BUY":
+            risk = stop_loss - current_price
+            reward = take_profit - current_price
+        else:
+            risk = current_price - stop_loss
+            reward = current_price - take_profit
+
+        risk_reward = abs(reward / risk) if risk != 0 else 0
+
+        message = (
+            f"🎯 <b>سیگنال جدید #{signal_data['id']}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"{symbol_info['emoji']} نماد: {symbol_info['name']}\n"
+            f"📊 نوع سیگنال: {signal}\n"
+            f"💰 قیمت ورود: ${current_price:.2f}\n"
+            f"🛑 حد ضرر: ${stop_loss:.2f}\n"
+            f"✅ حد سود: ${take_profit:.2f}\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"📈 جهت روند: {'صعودی 📈' if trend_info['trend'] == 'UP' else 'نزولی 📉'}\n"
+            f"💪 قدرت روند: {trend_info['strength']:.0f}٪\n"
+            f"📊 ADX: {trend_info['adx']:.1f}\n"
+            f"🎯 اطمینان سیگنال: {confidence:.0f}٪\n"
+            f"⚖️ نسبت ریسک/ریوارد: 1:{risk_reward:.2f}\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+       send_telegram_message(message)
+        logger.info(f"سیگنال #{signal_data['id']} برای {symbol_info['name']} ثبت شد")
+
+def job(api_manager):
+    """وظیفه اصلی با زمان‌بندی هوشمند"""
+    logger.info("🔄 بررسی هوشمند بازار...")
+
+    for symbol_key in SYMBOLS:
+        if not SYMBOLS[symbol_key]["enabled"]:
+            continue
+
+        try:
+            # بررسی روند (هر ۵ دقیقه)
+            if api_manager.should_check_trend(symbol_key):
+                process_symbol_trend(api_manager, symbol_key)
+                time.sleep(2)  # مکث کوتاه
+
+            # بررسی سیگنال (هر ۱ دقیقه در روند قوی)
+            if api_manager.should_check_signal(symbol_key):
+                process_symbol_signal(api_manager, symbol_key)
+                time.sleep(2)  # مکث کوتاه
+
+        except Exception as e:
+            logger.error(f"خطا در پردازش {symbol_key}: {e}")
+
+    # بررسی گزارش روزانه
+    send_daily_report(api_manager)
+
+def send_daily_report(api_manager):
+    """ارسال گزارش روزانه"""
+    now = datetime.now()
+
+    if api_manager.last_report_date == now.strftime('%Y-%m-%d'):
+        return
+
+    if now.hour != REPORT_HOUR:
+        return
+
+    report = api_manager.signal_tracker.get_daily_report()
+    if report:
+        message = api_manager.signal_tracker.format_daily_report(report)
+        send_telegram_message(message)
+        logger.info("گزارش روزانه ارسال شد")
+        api_manager.last_report_date = now.strftime('%Y-%m-%d')
+
+def main():
+    """تابع اصلی"""
+    logger.info("🤖 ربات هوشمند با زمان‌بندی بهینه شروع به کار کرد")
+
+    api_manager = APIManager()
+
+    # پیام شروع
+    status = api_manager.get_status()
+    active_symbols = [SYMBOLS[key]['name'] for key in SYMBOLS if SYMBOLS[key]['enabled']]
+
+    start_message = (
+        "✅ <b>ربات هوشمند فعال شد</b>\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"📊 نمادها: {', '.join(active_symbols)}\n"
+        f"🎯 استراتژی: MTF هوشمند\n"
+        f"⏰ بررسی روند: هر {TREND_CHECK_INTERVAL} دقیقه\n"
+        f"⚡ بررسی سیگنال: هر {SIGNAL_CHECK_INTERVAL} دقیقه (در روند قوی)\n"
+        f"📈 اندیکاتورها: EMA, RSI, MACD, ADX, ATR\n"
+        f"📊 سهمیه API: {status['daily_limit']} درخواست\n"
+        f"📋 گزارش روزانه: ساعت {REPORT_HOUR}:00\n"
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    send_telegram_message(start_message)
+
+    # اجرای اولیه
+    job(api_manager)
+
+    # زمان‌بندی اصلی - هر ۱ دقیقه چک می‌کند
+    schedule.every(1).minutes.do(job, api_manager=api_manager)
+
+    # حلقه اصلی
+    while True:
+        try:
+            schedule.run_pending()
+            time.sleep(20)  # چک کردن هر ۲۰ ثانیه
+
+            # ریست روزانه
+            if api_manager.state.get('date') != datetime.now().strftime('%Y-%m-%d'):
+                logger.info("روز جدید! ریست شمارنده")
+                api_manager.state = {'date': datetime.now().strftime('%Y-%m-%d'), 'requests_today': 0}
+                api_manager.last_request_times = []
+                api_manager.last_report_date = None
+                api_manager.trend_state = {}
+                api_manager.last_trend_check = {}
+                api_manager.save_state()
+
+        except KeyboardInterrupt:
+            logger.info("ربات متوقف شد")
+            break
+        except Exception as e:
+            logger.error(f"خطای غیرمنتظره: {e}")
+            time.sleep(60)
+
+if __name__ == "__main__":
+    main()
