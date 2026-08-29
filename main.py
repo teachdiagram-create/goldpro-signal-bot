@@ -3,6 +3,7 @@ import time
 import json
 import requests
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import schedule
 import logging
@@ -17,6 +18,12 @@ logger = logging.getLogger(__name__)
 
 # بارگذاری متغیرهای محیطی
 load_dotenv()
+
+# منطقه زمانی ایران
+IRAN_TZ = ZoneInfo("Asia/Tehran")
+
+def get_iran_time():
+    return datetime.now(IRAN_TZ)
 
 # تنظیمات
 API_KEY = os.getenv("TWELVE_DATA_API_KEY")
@@ -89,7 +96,7 @@ class SignalTracker:
         try:
             with open(SIGNALS_FILE, 'r') as f:
                 data = json.load(f)
-                today = datetime.now().strftime('%Y-%m-%d')
+                today = get_iran_time().strftime('%Y-%m-%d')
                 if data.get('date') == today:
                     return data.get('signals', [])
                 else:
@@ -107,7 +114,7 @@ class SignalTracker:
 
     def save_signals(self):
         data = {
-            'date': datetime.now().strftime('%Y-%m-%d'),
+            'date': get_iran_time().strftime('%Y-%m-%d'),
             'signals': self.signals,
             'total_counter': self.signal_counter
         }
@@ -123,8 +130,8 @@ class SignalTracker:
             'symbol': symbol_key,
             'symbol_name': symbol_info['name'],
             'symbol_emoji': symbol_info['emoji'],
-            'date': datetime.now().strftime('%Y-%m-%d'),
-            'time': datetime.now().strftime('%H:%M:%S'),
+            'date': get_iran_time().strftime('%Y-%m-%d'),
+            'time': get_iran_time().strftime('%H:%M:%S'),
             'type': signal_type,
             'entry_price': round(entry_price, 2),
             'stop_loss': round(stop_loss, 2),
@@ -157,14 +164,14 @@ class SignalTracker:
                 if current_price >= tp:
                     signal['status'] = 'WIN'
                     signal['close_price'] = current_price
-                    signal['close_time'] = datetime.now().strftime('%H:%M:%S')
+                    signal['close_time'] = get_iran_time().strftime('%H:%M:%S')
                     signal['result_pips'] = round((current_price - entry) * 100, 2)
                     updated = True
                     self.send_signal_close_notification(signal)
                 elif current_price <= sl:
                     signal['status'] = 'LOSS'
                     signal['close_price'] = current_price
-                    signal['close_time'] = datetime.now().strftime('%H:%M:%S')
+                    signal['close_time'] = get_iran_time().strftime('%H:%M:%S')
                     signal['result_pips'] = round((current_price - entry) * 100, 2)
                     updated = True
                     self.send_signal_close_notification(signal)
@@ -173,14 +180,14 @@ class SignalTracker:
                 if current_price <= tp:
                     signal['status'] = 'WIN'
                     signal['close_price'] = current_price
-                    signal['close_time'] = datetime.now().strftime('%H:%M:%S')
+                    signal['close_time'] = get_iran_time().strftime('%H:%M:%S')
                     signal['result_pips'] = round((entry - current_price) * 100, 2)
                     updated = True
                     self.send_signal_close_notification(signal)
                 elif current_price >= sl:
                     signal['status'] = 'LOSS'
                     signal['close_price'] = current_price
-                    signal['close_time'] = datetime.now().strftime('%H:%M:%S')
+                    signal['close_time'] = get_iran_time().strftime('%H:%M:%S')
                     signal['result_pips'] = round((entry - current_price) * 100, 2)
                     updated = True
                     self.send_signal_close_notification(signal)
@@ -201,7 +208,7 @@ class SignalTracker:
             f"💵 قیمت بسته شدن: ${signal['close_price']:.2f}\n"
             f"📈 نتیجه: {signal['result_pips']:+.2f} پیپ\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"🕐 {datetime.now().strftime('%H:%M:%S')}"
+            f"🕐 {get_iran_time().strftime('%H:%M:%S')}"
         )
         send_telegram_message(message)
 
@@ -210,7 +217,7 @@ class SignalTracker:
             return None
 
         report = {
-            'date': datetime.now().strftime('%Y-%m-%d'),
+            'date': get_iran_time().strftime('%Y-%m-%d'),
             'total_signals': len(self.signals),
             'win_signals': len([s for s in self.signals if s['status'] == 'WIN']),
             'loss_signals': len([s for s in self.signals if s['status'] == 'LOSS']),
@@ -280,7 +287,7 @@ class SignalTracker:
                 f"{signal['type']} | نتیجه: {result_text} پیپ\n"
             )
 
-        message += f"━━━━━━━━━━━━━━━━━━\n🕐 {datetime.now().strftime('%H:%M:%S')}"
+        message += f"━━━━━━━━━━━━━━━━━━\n🕐 {get_iran_time().strftime('%H:%M:%S')}"
 
         return message
 class TechnicalIndicators:
@@ -442,20 +449,20 @@ class APIManager:
         try:
             with open(STATE_FILE, 'r') as f:
                 state = json.load(f)
-                if state.get('date') != datetime.now().strftime('%Y-%m-%d'):
-                    return {'date': datetime.now().strftime('%Y-%m-%d'), 'requests_today': 0}
+                if state.get('date') != get_iran_time().strftime('%Y-%m-%d'):
+                    return {'date': get_iran_time().strftime('%Y-%m-%d'), 'requests_today': 0}
                 return state
         except FileNotFoundError:
-            return {'date': datetime.now().strftime('%Y-%m-%d'), 'requests_today': 0}
+            return {'date': get_iran_time().strftime('%Y-%m-%d'), 'requests_today': 0}
 
     def save_state(self):
-        self.state['date'] = datetime.now().strftime('%Y-%m-%d')
+        self.state['date'] = get_iran_time().strftime('%Y-%m-%d')
         self.state['requests_today'] = self.state.get('requests_today', 0)
         with open(STATE_FILE, 'w') as f:
             json.dump(self.state, f)
 
     def can_make_request(self):
-        now = datetime.now()
+        now = get_iran_time()
 
         if self.state.get('date') != now.strftime('%Y-%m-%d'):
             self.state = {'date': now.strftime('%Y-%m-%d'), 'requests_today': 0}
@@ -476,7 +483,7 @@ class APIManager:
         return True
 
     def record_request(self):
-        now = datetime.now()
+        now = get_iran_time()
         self.last_request_times.append(now)
         self.state['requests_today'] = self.state.get('requests_today', 0) + 1
         self.save_state()
@@ -676,16 +683,17 @@ def find_entry_signal(data_1min, trend, symbol_key):
 
 
 def is_market_open(symbol_key):
-    now = datetime.now()
+    now = get_iran_time()
 
     if symbol_key == "BITCOIN":
         return True
 
-    if now.weekday() == 5:
+    # بازار طلا (فارکس) - جمعه شب تعطیل، شنبه و یکشنبه تعطیل
+    if now.weekday() == 5:  # شنبه
         return False
-    if now.weekday() == 6:
+    if now.weekday() == 6:  # یکشنبه
         return False
-    if now.weekday() == 4 and now.hour >= 22:
+    if now.weekday() == 4 and now.hour >= 22:  # جمعه بعد از ۲۲:۰۰ به وقت ایران
         return False
     return True
 
@@ -713,7 +721,7 @@ def process_symbol_trend(api_manager, symbol_key):
         'strength': trend_strength,
         'adx': adx,
         'is_strong': is_strong,
-        'last_update': datetime.now().strftime('%H:%M:%S')
+        'last_update': get_iran_time().strftime('%H:%M:%S')
     }
 
     logger.info(f"{symbol_info['name']}: روند {trend} | قدرت {trend_strength:.0f}٪ | ADX {adx:.1f} | قوی: {is_strong}")
@@ -728,7 +736,7 @@ def process_symbol_trend(api_manager, symbol_key):
             f"📊 ADX: {adx:.1f}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"⚠️ مراقب تغییر روند باشید\n"
-            f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            f"🕐 {get_iran_time().strftime('%Y-%m-%d %H:%M:%S')}"
         )
         send_telegram_message(message)
 
@@ -792,7 +800,7 @@ def process_symbol_signal(api_manager, symbol_key):
             f"🎯 اطمینان سیگنال: {confidence:.0f}٪\n"
             f"⚖️ نسبت ریسک/ریوارد: 1:{risk_reward:.2f}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            f"🕐 {get_iran_time().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
         send_telegram_message(message)
@@ -822,7 +830,7 @@ def job(api_manager):
 
 
 def send_daily_report(api_manager):
-    now = datetime.now()
+    now = get_iran_time()
 
     if api_manager.last_report_date == now.strftime('%Y-%m-%d'):
         return
@@ -857,7 +865,7 @@ def main():
         f"📊 سهمیه API: {status['daily_limit']} درخواست\n"
         f"📋 گزارش روزانه: ساعت {REPORT_HOUR}:00\n"
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"🕐 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        f"🕐 {get_iran_time().strftime('%Y-%m-%d %H:%M:%S')}"
     )
     send_telegram_message(start_message)
 
@@ -870,9 +878,9 @@ def main():
             schedule.run_pending()
             time.sleep(20)
 
-            if api_manager.state.get('date') != datetime.now().strftime('%Y-%m-%d'):
+            if api_manager.state.get('date') != get_iran_time().strftime('%Y-%m-%d'):
                 logger.info("روز جدید! ریست شمارنده")
-                api_manager.state = {'date': datetime.now().strftime('%Y-%m-%d'), 'requests_today': 0}
+                api_manager.state = {'date': get_iran_time().strftime('%Y-%m-%d'), 'requests_today': 0}
                 api_manager.last_request_times = []
                 api_manager.last_report_date = None
                 api_manager.trend_state = {}
