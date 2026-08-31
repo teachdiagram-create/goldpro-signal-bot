@@ -54,23 +54,23 @@ ADX_PERIOD = 14
 ADX_TREND_LEVEL = 20
 ATR_PERIOD = 14
 
-# پارامترهای مخصوص هر نماد
+# پارامترهای مخصوص هر نماد (به‌روزرسانی شده)
 SYMBOL_PARAMS = {
     "GOLD": {
-        "RSI_OVERSOLD": 35,
-        "RSI_OVERBOUGHT": 65,
-        "ATR_MULTIPLIER_SL": 2.0,
-        "ATR_MULTIPLIER_TP": 3.0,
-        "MIN_CONFIDENCE": 60,
-        "STRONG_TREND_ADX": 25
+        "RSI_OVERSOLD": 30,
+        "RSI_OVERBOUGHT": 70,
+        "ATR_MULTIPLIER_SL": 2.5,
+        "ATR_MULTIPLIER_TP": 3.5,
+        "MIN_CONFIDENCE": 70,
+        "STRONG_TREND_ADX": 30
     },
     "BITCOIN": {
         "RSI_OVERSOLD": 30,
         "RSI_OVERBOUGHT": 70,
         "ATR_MULTIPLIER_SL": 2.5,
         "ATR_MULTIPLIER_TP": 3.5,
-        "MIN_CONFIDENCE": 65,
-        "STRONG_TREND_ADX": 28
+        "MIN_CONFIDENCE": 70,
+        "STRONG_TREND_ADX": 30
     }
 }
 
