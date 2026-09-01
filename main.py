@@ -653,35 +653,37 @@ def find_entry_signal(data_1min, trend, symbol_key):
     confidence = 0
 
     if trend == "UP":
-        if current_rsi < params['RSI_OVERSOLD'] and current_macd > current_signal and current_histogram > prev_histogram:
+        # خرید در پولبک: RSI زیر 50 و MACD صعودی
+        if current_rsi < 50 and current_macd > current_signal and current_histogram > prev_histogram:
             signal = "BUY"
             stop_loss = current_price - (current_atr * params['ATR_MULTIPLIER_SL'])
             take_profit = current_price + (current_atr * params['ATR_MULTIPLIER_TP'])
-            confidence = min(90, 50 + (params['RSI_OVERSOLD'] - current_rsi))
-        elif current_rsi > params['RSI_OVERSOLD'] and rsi_values[-2] <= params['RSI_OVERSOLD']:
+            confidence = min(90, 50 + (50 - current_rsi) * 1.5)
+        # برگشت از اشباع فروش
+        elif current_rsi > 30 and rsi_values[-2] <= 30:
             signal = "BUY"
             stop_loss = current_price - (current_atr * params['ATR_MULTIPLIER_SL'])
             take_profit = current_price + (current_atr * params['ATR_MULTIPLIER_TP'])
-            confidence = params['MIN_CONFIDENCE']
+            confidence = 70
 
     elif trend == "DOWN":
-        if current_rsi > params['RSI_OVERBOUGHT'] and current_macd < current_signal and current_histogram < prev_histogram:
+        # فروش در پولبک: RSI بالای 50 و MACD نزولی
+        if current_rsi > 50 and current_macd < current_signal and current_histogram < prev_histogram:
             signal = "SELL"
             stop_loss = current_price + (current_atr * params['ATR_MULTIPLIER_SL'])
             take_profit = current_price - (current_atr * params['ATR_MULTIPLIER_TP'])
-            confidence = min(90, 50 + (current_rsi - params['RSI_OVERBOUGHT']))
-        elif current_rsi < params['RSI_OVERBOUGHT'] and rsi_values[-2] >= params['RSI_OVERBOUGHT']:
+            confidence = min(90, 50 + (current_rsi - 50) * 1.5)
+        # برگشت از اشباع خرید
+        elif current_rsi < 70 and rsi_values[-2] >= 70:
             signal = "SELL"
             stop_loss = current_price + (current_atr * params['ATR_MULTIPLIER_SL'])
             take_profit = current_price - (current_atr * params['ATR_MULTIPLIER_TP'])
-            confidence = params['MIN_CONFIDENCE']
+            confidence = 70
 
     if confidence < params['MIN_CONFIDENCE']:
         return None, None, None, None
 
     return signal, stop_loss, take_profit, confidence
-
-
 def is_market_open(symbol_key):
     now = get_iran_time()
 
