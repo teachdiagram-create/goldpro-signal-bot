@@ -59,17 +59,17 @@ SYMBOL_PARAMS = {
     "GOLD": {
         "RSI_OVERSOLD": 30,
         "RSI_OVERBOUGHT": 70,
-        "ATR_MULTIPLIER_SL": 2.5,
-        "ATR_MULTIPLIER_TP": 3.5,
-        "MIN_CONFIDENCE": 70,
+        "ATR_MULTIPLIER_SL": 3.0,
+        "ATR_MULTIPLIER_TP": 4.5,
+        "MIN_CONFIDENCE": 65,
         "STRONG_TREND_ADX": 30
     },
     "BITCOIN": {
         "RSI_OVERSOLD": 30,
         "RSI_OVERBOUGHT": 70,
-        "ATR_MULTIPLIER_SL": 2.5,
-        "ATR_MULTIPLIER_TP": 3.5,
-        "MIN_CONFIDENCE": 70,
+        "ATR_MULTIPLIER_SL": 3.5,
+        "ATR_MULTIPLIER_TP": 5.0,
+        "MIN_CONFIDENCE": 65,
         "STRONG_TREND_ADX": 30
     }
 }
