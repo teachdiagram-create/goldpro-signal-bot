@@ -42,27 +42,27 @@ SYMBOLS = {
         "symbol": "BTC/USD",
         "name": "بیت کوین",
         "emoji": "₿",
-        "enabled": True
+        "enabled": false
     }
 }
 
 # پارامترهای استراتژی
-EMA_FAST = 9
-EMA_SLOW = 21
+EMA_FAST = 5
+EMA_SLOW = 13
 RSI_PERIOD = 14
 ADX_PERIOD = 14
-ADX_TREND_LEVEL = 20
+ADX_TREND_LEVEL = 18
 ATR_PERIOD = 14
 
 # پارامترهای مخصوص هر نماد (به‌روزرسانی شده)
 SYMBOL_PARAMS = {
     "GOLD": {
-        "RSI_OVERSOLD": 30,
-        "RSI_OVERBOUGHT": 70,
-        "ATR_MULTIPLIER_SL": 3.0,
-        "ATR_MULTIPLIER_TP": 4.5,
-        "MIN_CONFIDENCE": 65,
-        "STRONG_TREND_ADX": 30
+        "RSI_OVERSOLD": 35,
+        "RSI_OVERBOUGHT": 65,
+        "ATR_MULTIPLIER_SL": 3.5,
+        "ATR_MULTIPLIER_TP": 5.0,
+        "MIN_CONFIDENCE": 60,
+        "STRONG_TREND_ADX": 25
     },
     "BITCOIN": {
         "RSI_OVERSOLD": 30,
