@@ -39,11 +39,11 @@ SYMBOLS = {
         "enabled": True
     },
     "BITCOIN": {
-        "symbol": "BTC/USD",
-        "name": "بیت کوین",
-        "emoji": "₿",
-        "enabled":false 
-    }
+    "symbol": "BTC/USD",
+    "name": "بیت کوین",
+    "emoji": "₿",
+    "enabled": False        # تغییر از True به False
+}
 }
 
 # پارامترهای استراتژی
