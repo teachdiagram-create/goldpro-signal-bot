@@ -579,6 +579,9 @@ def get_market_data(api_manager, symbol_key, interval="5min", outputsize=100):
         return None
 
 
+
+
+
 def analyze_trend(data_5min, symbol_key):
     closes = [float(item["close"]) for item in reversed(data_5min)]
     highs = [float(item["high"]) for item in reversed(data_5min)]
@@ -638,6 +641,7 @@ def find_entry_signal(data_1min, trend, symbol_key):
         return None, None, None, None
 
     current_rsi = rsi_values[-1]
+    prev_rsi = rsi_values[-2] if len(rsi_values) > 1 else current_rsi
     current_atr = atr_values[-1]
     current_price = closes[-1]
 
@@ -653,28 +657,28 @@ def find_entry_signal(data_1min, trend, symbol_key):
     confidence = 0
 
     if trend == "UP":
-        # خرید در پولبک: RSI زیر 50 و MACD صعودی
-        if current_rsi < 50 and current_macd > current_signal and current_histogram > prev_histogram:
+        # سیگنال خرید وقتی RSI از زیر 50 به بالای 50 برود و MACD صعودی باشد
+        if prev_rsi <= 50 and current_rsi > 50 and current_macd > current_signal:
             signal = "BUY"
             stop_loss = current_price - (current_atr * params['ATR_MULTIPLIER_SL'])
             take_profit = current_price + (current_atr * params['ATR_MULTIPLIER_TP'])
-            confidence = min(90, 50 + (50 - current_rsi) * 1.5)
-        # برگشت از اشباع فروش
-        elif current_rsi > 30 and rsi_values[-2] <= 30:
+            confidence = 75
+        # اگر RSI در ناحیه اشباع فروش باشد و MACD در حال چرخش صعودی
+        elif current_rsi < params['RSI_OVERSOLD'] and current_histogram > prev_histogram:
             signal = "BUY"
             stop_loss = current_price - (current_atr * params['ATR_MULTIPLIER_SL'])
             take_profit = current_price + (current_atr * params['ATR_MULTIPLIER_TP'])
             confidence = 70
 
     elif trend == "DOWN":
-        # فروش در پولبک: RSI بالای 50 و MACD نزولی
-        if current_rsi > 50 and current_macd < current_signal and current_histogram < prev_histogram:
+        # سیگنال فروش وقتی RSI از بالای 50 به زیر 50 برود و MACD نزولی باشد
+        if prev_rsi >= 50 and current_rsi < 50 and current_macd < current_signal:
             signal = "SELL"
             stop_loss = current_price + (current_atr * params['ATR_MULTIPLIER_SL'])
             take_profit = current_price - (current_atr * params['ATR_MULTIPLIER_TP'])
-            confidence = min(90, 50 + (current_rsi - 50) * 1.5)
-        # برگشت از اشباع خرید
-        elif current_rsi < 70 and rsi_values[-2] >= 70:
+            confidence = 75
+        # اگر RSI در ناحیه اشباع خرید باشد و MACD در حال چرخش نزولی
+        elif current_rsi > params['RSI_OVERBOUGHT'] and current_histogram < prev_histogram:
             signal = "SELL"
             stop_loss = current_price + (current_atr * params['ATR_MULTIPLIER_SL'])
             take_profit = current_price - (current_atr * params['ATR_MULTIPLIER_TP'])
@@ -684,6 +688,17 @@ def find_entry_signal(data_1min, trend, symbol_key):
         return None, None, None, None
 
     return signal, stop_loss, take_profit, confidence
+
+
+
+
+
+
+
+
+
+
+
 def is_market_open(symbol_key):
     now = get_iran_time()
 
