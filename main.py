@@ -42,7 +42,7 @@ SYMBOLS = {
         "symbol": "BTC/USD",
         "name": "بیت کوین",
         "emoji": "₿",
-        "enabled": false
+        "enabled": false 
     }
 }
 
