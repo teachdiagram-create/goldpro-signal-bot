@@ -39,22 +39,22 @@ SYMBOLS = {
         "enabled": True
     },
     "BITCOIN": {
-    "symbol": "BTC/USD",
-    "name": "بیت کوین",
-    "emoji": "₿",
-    "enabled": False        # تغییر از True به False
-}
+        "symbol": "BTC/USD",
+        "name": "بیت کوین",
+        "emoji": "₿",
+        "enabled": False          # بیت کوین غیرفعال شد
+    }
 }
 
 # پارامترهای استراتژی
-EMA_FAST = 5
-EMA_SLOW = 13
+EMA_FAST = 5          # قبلاً 9 بود
+EMA_SLOW = 13         # قبلاً 21 بود
 RSI_PERIOD = 14
 ADX_PERIOD = 14
-ADX_TREND_LEVEL = 18
+ADX_TREND_LEVEL = 18  # قبلاً 20 بود
 ATR_PERIOD = 14
 
-# پارامترهای مخصوص هر نماد (به‌روزرسانی شده)
+# پارامترهای مخصوص هر نماد
 SYMBOL_PARAMS = {
     "GOLD": {
         "RSI_OVERSOLD": 35,
@@ -67,8 +67,8 @@ SYMBOL_PARAMS = {
     "BITCOIN": {
         "RSI_OVERSOLD": 30,
         "RSI_OVERBOUGHT": 70,
-        "ATR_MULTIPLIER_SL": 3.5,
-        "ATR_MULTIPLIER_TP": 5.0,
+        "ATR_MULTIPLIER_SL": 2.5,
+        "ATR_MULTIPLIER_TP": 3.5,
         "MIN_CONFIDENCE": 65,
         "STRONG_TREND_ADX": 30
     }
@@ -290,6 +290,7 @@ class SignalTracker:
         message += f"━━━━━━━━━━━━━━━━━━\n🕐 {get_iran_time().strftime('%H:%M:%S')}"
 
         return message
+
 class TechnicalIndicators:
     @staticmethod
     def calculate_ema(data, period):
@@ -523,6 +524,7 @@ class APIManager:
         if trend_info.get('is_strong', False):
             return True
         return False
+
 def send_telegram_message(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         logger.warning("تنظیمات تلگرام کامل نیست")
@@ -541,7 +543,7 @@ def send_telegram_message(text):
         return False
 
 
-def get_market_data(api_manager, symbol_key, interval="5min", outputsize=100):
+def get_market_data(api_manager, symbol_key, interval="5min", outputsize=50):
     if not api_manager.can_make_request():
         return None
 
@@ -577,9 +579,6 @@ def get_market_data(api_manager, symbol_key, interval="5min", outputsize=100):
     except Exception as e:
         logger.error(f"خطا در دریافت داده {symbol}: {e}")
         return None
-
-
-
 
 
 def analyze_trend(data_5min, symbol_key):
@@ -626,10 +625,64 @@ def analyze_trend(data_5min, symbol_key):
     return trend, trend_strength, reversal, current_adx, is_strong
 
 
+def detect_candlestick_pattern(opens, highs, lows, closes, trend):
+    """
+    تشخیص الگوهای کندلی ساده در آخرین کندل.
+    خروجی: True اگر الگوی تأییدکننده روند پیدا شود، در غیر این صورت False.
+    """
+    if len(opens) < 2 or len(highs) < 2 or len(lows) < 2 or len(closes) < 2:
+        return False
+
+    # آخرین کندل (کندل فعلی)
+    o1 = opens[-1]
+    h1 = highs[-1]
+    l1 = lows[-1]
+    c1 = closes[-1]
+
+    # کندل قبلی
+    o2 = opens[-2]
+    h2 = highs[-2]
+    l2 = lows[-2]
+    c2 = closes[-2]
+
+    # بدنه کندل
+    body1 = abs(c1 - o1)
+    body2 = abs(c2 - o2)
+    if body1 == 0 or body2 == 0:
+        return False
+
+    if trend == "UP":
+        # الگوهای صعودی: پوشای صعودی، چکش
+        # پوشای صعودی: کندل قبلی نزولی (c2 < o2)، کندل فعلی صعودی (c1 > o1)، بدنه کندل فعلی بدنه قبلی را بپوشاند
+        if c2 < o2 and c1 > o1 and c1 > o2 and o1 < c2:
+            return True
+        # چکش: سایه پایینی بلند، بدنه کوچک، سایه بالایی کوتاه، و روند صعودی
+        lower_shadow = min(o1, c1) - l1
+        upper_shadow = h1 - max(o1, c1)
+        if lower_shadow >= 2 * body1 and upper_shadow <= body1 * 0.5:
+            return True
+        return False
+
+    elif trend == "DOWN":
+        # الگوهای نزولی: پوشای نزولی، ستاره دنباله‌دار
+        # پوشای نزولی: کندل قبلی صعودی (c2 > o2)، کندل فعلی نزولی (c1 < o1)، بدنه کندل فعلی بدنه قبلی را بپوشاند
+        if c2 > o2 and c1 < o1 and c1 < o2 and o1 > c2:
+            return True
+        # ستاره دنباله‌دار: سایه بالایی بلند، بدنه کوچک، سایه پایینی کوتاه
+        upper_shadow = h1 - max(o1, c1)
+        lower_shadow = min(o1, c1) - l1
+        if upper_shadow >= 2 * body1 and lower_shadow <= body1 * 0.5:
+            return True
+        return False
+
+    return False
+
+
 def find_entry_signal(data_1min, trend, symbol_key):
-    closes = [float(item["close"]) for item in reversed(data_1min)]
+    opens = [float(item["open"]) for item in reversed(data_1min)]
     highs = [float(item["high"]) for item in reversed(data_1min)]
     lows = [float(item["low"]) for item in reversed(data_1min)]
+    closes = [float(item["close"]) for item in reversed(data_1min)]
 
     params = SYMBOL_PARAMS[symbol_key]
 
@@ -651,52 +704,42 @@ def find_entry_signal(data_1min, trend, symbol_key):
     current_histogram = histogram[-1]
     prev_histogram = histogram[-2] if len(histogram) > 1 else 0
 
+    # بررسی الگوی کندلی
+    pattern_confirmed = detect_candlestick_pattern(opens, highs, lows, closes, trend)
+
     signal = None
     stop_loss = None
     take_profit = None
     confidence = 0
 
     if trend == "UP":
-        # سیگنال خرید وقتی RSI از زیر 50 به بالای 50 برود و MACD صعودی باشد
-        if prev_rsi <= 50 and current_rsi > 50 and current_macd > current_signal:
+        if pattern_confirmed and prev_rsi <= 50 and current_rsi > 50 and current_macd > current_signal:
+            signal = "BUY"
+            stop_loss = current_price - (current_atr * params['ATR_MULTIPLIER_SL'])
+            take_profit = current_price + (current_atr * params['ATR_MULTIPLIER_TP'])
+            confidence = 80
+        elif pattern_confirmed and current_rsi < params['RSI_OVERSOLD'] and current_histogram > prev_histogram:
             signal = "BUY"
             stop_loss = current_price - (current_atr * params['ATR_MULTIPLIER_SL'])
             take_profit = current_price + (current_atr * params['ATR_MULTIPLIER_TP'])
             confidence = 75
-        # اگر RSI در ناحیه اشباع فروش باشد و MACD در حال چرخش صعودی
-        elif current_rsi < params['RSI_OVERSOLD'] and current_histogram > prev_histogram:
-            signal = "BUY"
-            stop_loss = current_price - (current_atr * params['ATR_MULTIPLIER_SL'])
-            take_profit = current_price + (current_atr * params['ATR_MULTIPLIER_TP'])
-            confidence = 70
 
     elif trend == "DOWN":
-        # سیگنال فروش وقتی RSI از بالای 50 به زیر 50 برود و MACD نزولی باشد
-        if prev_rsi >= 50 and current_rsi < 50 and current_macd < current_signal:
+        if pattern_confirmed and prev_rsi >= 50 and current_rsi < 50 and current_macd < current_signal:
+            signal = "SELL"
+            stop_loss = current_price + (current_atr * params['ATR_MULTIPLIER_SL'])
+            take_profit = current_price - (current_atr * params['ATR_MULTIPLIER_TP'])
+            confidence = 80
+        elif pattern_confirmed and current_rsi > params['RSI_OVERBOUGHT'] and current_histogram < prev_histogram:
             signal = "SELL"
             stop_loss = current_price + (current_atr * params['ATR_MULTIPLIER_SL'])
             take_profit = current_price - (current_atr * params['ATR_MULTIPLIER_TP'])
             confidence = 75
-        # اگر RSI در ناحیه اشباع خرید باشد و MACD در حال چرخش نزولی
-        elif current_rsi > params['RSI_OVERBOUGHT'] and current_histogram < prev_histogram:
-            signal = "SELL"
-            stop_loss = current_price + (current_atr * params['ATR_MULTIPLIER_SL'])
-            take_profit = current_price - (current_atr * params['ATR_MULTIPLIER_TP'])
-            confidence = 70
 
     if confidence < params['MIN_CONFIDENCE']:
         return None, None, None, None
 
     return signal, stop_loss, take_profit, confidence
-
-
-
-
-
-
-
-
-
 
 
 def is_market_open(symbol_key):
@@ -721,7 +764,7 @@ def process_symbol_trend(api_manager, symbol_key):
     if not is_market_open(symbol_key):
         return
 
-    data_5min = get_market_data(api_manager, symbol_key, "5min", 100)
+    data_5min = get_market_data(api_manager, symbol_key, "5min", 50)
     if not data_5min:
         return
 
@@ -768,7 +811,7 @@ def process_symbol_signal(api_manager, symbol_key):
     if trend_info.get('trend') == "NEUTRAL":
         return
 
-    data_1min = get_market_data(api_manager, symbol_key, "1min", 100)
+    data_1min = get_market_data(api_manager, symbol_key, "1min", 50)
     if not data_1min:
         return
 
@@ -834,11 +877,11 @@ def job(api_manager):
         try:
             if api_manager.should_check_trend(symbol_key):
                 process_symbol_trend(api_manager, symbol_key)
-                time.sleep(2)
+                time.sleep(3)
 
             if api_manager.should_check_signal(symbol_key):
                 process_symbol_signal(api_manager, symbol_key)
-                time.sleep(2)
+                time.sleep(3)
 
         except Exception as e:
             logger.error(f"خطا در پردازش {symbol_key}: {e}")
@@ -875,10 +918,11 @@ def main():
         "✅ <b>ربات هوشمند فعال شد</b>\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"📊 نمادها: {', '.join(active_symbols)}\n"
-        f"🎯 استراتژی: MTF هوشمند\n"
+        f"🎯 استراتژی: MTF هوشمند + الگوهای کندلی\n"
         f"⏰ بررسی روند: هر {TREND_CHECK_INTERVAL} دقیقه\n"
         f"⚡ بررسی سیگنال: هر {SIGNAL_CHECK_INTERVAL} دقیقه (در روند قوی)\n"
         f"📈 اندیکاتورها: EMA, RSI, MACD, ADX, ATR\n"
+        f"🕯️ الگوهای کندلی: پوشا، چکش، ستاره دنباله‌دار\n"
         f"📊 سهمیه API: {status['daily_limit']} درخواست\n"
         f"📋 گزارش روزانه: ساعت {REPORT_HOUR}:00\n"
         f"━━━━━━━━━━━━━━━━━━\n"
