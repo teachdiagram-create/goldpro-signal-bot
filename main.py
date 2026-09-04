@@ -54,10 +54,10 @@ MACD_SLOW = 26
 MACD_SIGNAL = 9
 
 GOLD = {
-    "MIN_ADX": 25.0,
-    "VERY_STRONG_ADX": 30.0,
-    "MIN_SCORE": 80,
-    "MIN_RR": 1.50,
+    "MIN_ADX": 20.0,
+    "VERY_STRONG_ADX": 25.0,
+    "MIN_SCORE": 60,
+    "MIN_RR": 1.20,
     "SL_ATR_BUFFER": 0.35,
     "MIN_ATR": 0.50,
     "MAX_ATR": 40.0,
