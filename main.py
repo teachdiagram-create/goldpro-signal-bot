@@ -75,7 +75,6 @@ SIGNALS_FILE = "/tmp/signals_history.json"
 REPORT_HOUR = 23
 TREND_CHECK_INTERVAL = 15
 SIGNAL_CHECK_INTERVAL = 3
-DEBUG_MODE = os.getenv("GOLDPRO_DEBUG", "1") == "1"
 
 # -----------------------------------------------------------------------------
 # Telegram
@@ -495,16 +494,46 @@ def analyze_trend(rows):
     hist = macd[2][-1]
     hist_prev = macd[2][-2]
 
-    up = price > ema20 > ema50 and ema20 > ema20_prev and ema50 >= ema50_prev and pdi > mdi
-    down = price < ema20 < ema50 and ema20 < ema20_prev and ema50 <= ema50_prev and mdi > pdi
+    # V2.1 trend fix:
+    # Do not require every condition (price position + both EMA slopes + DI)
+    # simultaneously. That combination was too restrictive and could keep a
+    # clearly directional market in NEUTRAL. ADX must still confirm trend
+    # strength; direction is determined mainly by EMA structure and DI.
     if adx < GOLD["MIN_ADX"]:
         direction = "NEUTRAL"
-    elif up:
-        direction = "UP"
-    elif down:
-        direction = "DOWN"
+        trend_reason = f"ADX<{GOLD['MIN_ADX']:.0f}"
     else:
-        direction = "NEUTRAL"
+        up_votes = sum([
+            price > ema20,
+            ema20 > ema50,
+            ema20 >= ema20_prev,
+            ema50 >= ema50_prev,
+            pdi > mdi,
+        ])
+        down_votes = sum([
+            price < ema20,
+            ema20 < ema50,
+            ema20 <= ema20_prev,
+            ema50 <= ema50_prev,
+            mdi > pdi,
+        ])
+
+        # 3/5 votes is enough for a directional trend, while ADX>=25
+        # keeps weak/choppy markets out. In a tie, stay NEUTRAL.
+        if up_votes >= 3 and up_votes > down_votes:
+            direction = "UP"
+            trend_reason = f"UP votes={up_votes}/5"
+        elif down_votes >= 3 and down_votes > up_votes:
+            direction = "DOWN"
+            trend_reason = f"DOWN votes={down_votes}/5"
+        else:
+            direction = "NEUTRAL"
+            trend_reason = f"votes UP={up_votes}/5 DOWN={down_votes}/5"
+
+    logger.info(
+        "📐 TREND DEBUG | price=%.2f EMA20=%.2f EMA50=%.2f | ADX=%.1f +DI=%.1f -DI=%.1f | %s | trend=%s",
+        price, ema20, ema50, adx, pdi, mdi, trend_reason, direction
+    )
 
     return {
         "trend": direction,
@@ -524,12 +553,11 @@ def analyze_trend(rows):
 # Strong entry: 1-minute closed candle + pullback/rejection + scoring
 # -----------------------------------------------------------------------------
 def find_strong_entry(rows, trend):
-    """Return a strong entry or None, with detailed rejection diagnostics in logs."""
     o, h, l, c = candle_data(rows)
-    # Work only with completed candles.
+    # Work only with completed candles. This is important for avoiding false
+    # signals caused by a candle changing shape while it is still open.
     o, h, l, c = o[:-1], h[:-1], l[:-1], c[:-1]
     if len(c) < 80:
-        logger.warning("🔎 DEBUG | داده کافی نیست: %s کندل", len(c))
         return None
 
     ef = TA.ema(c, EMA_FAST)
@@ -539,7 +567,6 @@ def find_strong_entry(rows, trend):
     adx_data = TA.adx(h, l, c, ADX_PERIOD)
     macd = TA.macd(c, MACD_FAST, MACD_SLOW, MACD_SIGNAL)
     if not all([ef, es, rsi, atrs, adx_data, macd]):
-        logger.warning("🔎 DEBUG | اندیکاتورها کامل نیستند")
         return None
 
     atr = atrs[-1]
@@ -551,144 +578,95 @@ def find_strong_entry(rows, trend):
     hist_prev = macd[2][-2]
     ema20, ema50 = ef[-1], es[-1]
 
+    if not (GOLD["MIN_ATR"] <= atr <= GOLD["MAX_ATR"]):
+        return None
+    if adx < GOLD["MIN_ADX"]:
+        return None
+
+    # Avoid chasing an extended move too far away from EMA20.
     distance_atr = abs(price - ema20) / atr if atr else 999
+    if distance_atr > GOLD["MAX_ENTRY_DISTANCE_ATR"]:
+        return None
+
+    # Pullback means at least one of the recent candles touched/approached EMA20.
     recent_low = min(l[-4:])
     recent_high = max(h[-4:])
     pullback_buy = recent_low <= ema20 + atr * 0.15
     pullback_sell = recent_high >= ema20 - atr * 0.15
+
     bull_pattern = bullish_engulfing(o, h, l, c) or bullish_rejection(o, h, l, c)
     bear_pattern = bearish_engulfing(o, h, l, c) or bearish_rejection(o, h, l, c)
+
+    # Momentum confirmation: not merely an RSI 50 cross.
     buy_momentum = r > 52 and r > r_prev and hist > 0 and hist >= hist_prev and pdi > mdi
     sell_momentum = r < 48 and r < r_prev and hist < 0 and hist <= hist_prev and mdi > pdi
 
-    if DEBUG_MODE:
-        logger.info(
-            "🔎 DEBUG | %s | trend=%s price=%.2f EMA20=%.2f EMA50=%.2f ATR=%.2f ADX=%.1f RSI=%.1f->%.1f +DI=%.1f -DI=%.1f MACDHist=%.3f->%.3f distEMA=%.2fATR pullB=%s pullS=%s bullC=%s bearC=%s buyMom=%s sellMom=%s",
-            SYMBOLS["GOLD"]["name"], trend, price, ema20, ema50, atr, adx, r_prev, r, pdi, mdi,
-            hist_prev, hist, distance_atr, pullback_buy, pullback_sell, bull_pattern, bear_pattern,
-            buy_momentum, sell_momentum
-        )
-
-    # Global blockers are logged explicitly.
-    blockers = []
-    if not (GOLD["MIN_ATR"] <= atr <= GOLD["MAX_ATR"]):
-        blockers.append(f"ATR خارج محدوده ({atr:.2f})")
-    if adx < GOLD["MIN_ADX"]:
-        blockers.append(f"ADX زیر {GOLD['MIN_ADX']:.0f} ({adx:.1f})")
-    if distance_atr > GOLD["MAX_ENTRY_DISTANCE_ATR"]:
-        blockers.append(f"قیمت {distance_atr:.2f}ATR از EMA20 دور است")
-    if blockers:
-        logger.info("🚫 DEBUG | رد شد قبل از امتیازدهی: %s", " | ".join(blockers))
-        return None
-
+    # Score is intentionally strict. Signal requires >= 80/100.
     if trend == "UP":
         score = 0
         reasons = []
-        missing = []
         if price > ema20 > ema50:
             score += 20; reasons.append("EMA20/50")
-        else:
-            missing.append("EMA20/50")
         if adx >= GOLD["VERY_STRONG_ADX"]:
             score += 20; reasons.append("ADX30+")
         elif adx >= GOLD["MIN_ADX"]:
             score += 12; reasons.append("ADX25+")
-        else:
-            missing.append("ADX")
         if pdi > mdi:
             score += 10; reasons.append("+DI")
-        else:
-            missing.append("+DI")
         if buy_momentum:
             score += 15; reasons.append("Momentum")
-        else:
-            missing.append("Momentum")
         if pullback_buy:
             score += 15; reasons.append("Pullback")
-        else:
-            missing.append("Pullback")
         if bull_pattern:
             score += 15; reasons.append("Candle")
-        else:
-            missing.append("Candle")
         if 52 <= r <= 68:
             score += 5; reasons.append("RSI zone")
-        else:
-            missing.append("RSI zone")
-
-        if DEBUG_MODE:
-            logger.info("📊 DEBUG | BUY score=%d/100 | تأیید: %s | کمبود: %s", score, ", ".join(reasons) or "هیچ", ", ".join(missing) or "هیچ")
         if score < GOLD["MIN_SCORE"]:
-            logger.info("🚫 DEBUG | BUY رد شد: score %d < %d", score, GOLD["MIN_SCORE"])
             return None
         signal = "BUY"
         swing = recent_swing_low(l, 10)
         sl = swing - atr * GOLD["SL_ATR_BUFFER"]
         risk = price - sl
         if risk <= 0:
-            logger.info("🚫 DEBUG | BUY رد شد: ریسک SL نامعتبر")
             return None
         tp = price + risk * 1.8
 
     elif trend == "DOWN":
         score = 0
         reasons = []
-        missing = []
         if price < ema20 < ema50:
             score += 20; reasons.append("EMA20/50")
-        else:
-            missing.append("EMA20/50")
         if adx >= GOLD["VERY_STRONG_ADX"]:
             score += 20; reasons.append("ADX30+")
         elif adx >= GOLD["MIN_ADX"]:
             score += 12; reasons.append("ADX25+")
-        else:
-            missing.append("ADX")
         if mdi > pdi:
             score += 10; reasons.append("-DI")
-        else:
-            missing.append("-DI")
         if sell_momentum:
             score += 15; reasons.append("Momentum")
-        else:
-            missing.append("Momentum")
         if pullback_sell:
             score += 15; reasons.append("Pullback")
-        else:
-            missing.append("Pullback")
         if bear_pattern:
             score += 15; reasons.append("Candle")
-        else:
-            missing.append("Candle")
         if 32 <= r <= 48:
             score += 5; reasons.append("RSI zone")
-        else:
-            missing.append("RSI zone")
-
-        if DEBUG_MODE:
-            logger.info("📊 DEBUG | SELL score=%d/100 | تأیید: %s | کمبود: %s", score, ", ".join(reasons) or "هیچ", ", ".join(missing) or "هیچ")
         if score < GOLD["MIN_SCORE"]:
-            logger.info("🚫 DEBUG | SELL رد شد: score %d < %d", score, GOLD["MIN_SCORE"])
             return None
         signal = "SELL"
         swing = recent_swing_high(h, 10)
         sl = swing + atr * GOLD["SL_ATR_BUFFER"]
         risk = sl - price
         if risk <= 0:
-            logger.info("🚫 DEBUG | SELL رد شد: ریسک SL نامعتبر")
             return None
         tp = price - risk * 1.8
     else:
-        logger.info("🚫 DEBUG | بدون ورود: trend=%s", trend)
         return None
 
     rr = abs(tp - price) / abs(price - sl)
     if rr < GOLD["MIN_RR"]:
-        logger.info("🚫 DEBUG | %s رد شد: R/R=%.2f < %.2f", signal, rr, GOLD["MIN_RR"])
         return None
 
     confidence = min(99.0, score + min(8.0, max(0.0, adx - 25.0) * 0.8))
-    logger.info("✅ DEBUG | %s شرایط کامل را دارد | score=%d confidence=%.0f RR=%.2f", signal, score, confidence, rr)
     return {
         "signal": signal,
         "entry": price,
@@ -743,9 +721,13 @@ def process_signal(manager, symbol_key):
         return
     trend = manager.trend_state.get(symbol_key)
     if not trend or trend["trend"] not in ("UP", "DOWN"):
-        if DEBUG_MODE:
-            logger.info("🚫 DEBUG | ورود بررسی نشد: trend موجود نیست یا NEUTRAL است")
+        logger.info("🚫 DEBUG | ورود بررسی نشد: trend موجود نیست یا NEUTRAL است")
         return
+
+    logger.info(
+        "🔎 DEBUG | شروع بررسی ورود | trend=%s ADX=%.1f RSI=%.1f +DI=%.1f -DI=%.1f",
+        trend["trend"], trend["adx"], trend["rsi"], trend["pdi"], trend["mdi"]
+    )
 
     rows = get_market_data(manager, symbol_key, "1min", 120)
     if not rows:
@@ -756,7 +738,6 @@ def process_signal(manager, symbol_key):
     if not result:
         return
     if not manager.cooldown_ok(symbol_key, result["signal"]):
-        logger.info("🚫 DEBUG | %s به‌علت cooldown %s دقیقه‌ای رد شد", result["signal"], GOLD["COOLDOWN_MINUTES"])
         return
 
     data = manager.tracker.add(symbol_key, result["signal"], result["entry"], result["sl"], result["tp"], result["confidence"], trend["trend"], result["adx"], result["score"])
@@ -802,11 +783,13 @@ def job(manager):
         if not info["enabled"]:
             continue
         try:
-            # One 1-minute request handles both open-trade monitoring and entry analysis.
-            if manager.due(manager.last_signal_check, key, SIGNAL_CHECK_INTERVAL):
-                process_signal(manager, key)
+            # Update the 5M trend before the first 1M entry check.
+            # This prevents the startup cycle from being skipped because
+            # trend_state has not been initialized yet.
             if manager.due(manager.last_trend_check, key, TREND_CHECK_INTERVAL):
                 process_trend(manager, key)
+            if manager.due(manager.last_signal_check, key, SIGNAL_CHECK_INTERVAL):
+                process_signal(manager, key)
         except Exception as exc:
             logger.exception("خطا در پردازش %s: %s", key, exc)
     daily_report(manager)
@@ -832,7 +815,6 @@ def main():
         "🧲 ورود: Pullback + Momentum + Candle\n"
         "🛡️ SL: Swing + ATR Buffer\n"
         "⏱️ روند هر 15 دقیقه | ورود هر 3 دقیقه\n"
-        f"🧪 Debug Log: {'ON' if DEBUG_MODE else 'OFF'}\n"
         "⚠️ فقط سیگنال‌های قوی؛ بدون معامله خودکار\n"
         "━━━━━━━━━━━━━━━━━━\n"
         f"🕐 {now_iran().strftime('%Y-%m-%d %H:%M:%S')}"
