@@ -704,7 +704,7 @@ def find_entry_signal(data_1min, trend, symbol_key):
     current_histogram = histogram[-1]
     prev_histogram = histogram[-2] if len(histogram) > 1 else 0
 
-    # بررسی الگوی کندلی
+    # بررسی الگوی کندلی (اختیاری)
     pattern_confirmed = detect_candlestick_pattern(opens, highs, lows, closes, trend)
 
     signal = None
@@ -713,28 +713,36 @@ def find_entry_signal(data_1min, trend, symbol_key):
     confidence = 0
 
     if trend == "UP":
-        if pattern_confirmed and prev_rsi <= 50 and current_rsi > 50 and current_macd > current_signal:
+        # شرایط پایه: عبور RSI از 50 و MACD صعودی
+        base_condition = (prev_rsi <= 50 and current_rsi > 50 and current_macd > current_signal)
+        # شرایط جایگزین: RSI در اشباع فروش و هیستوگرام در حال افزایش
+        alt_condition = (current_rsi < params['RSI_OVERSOLD'] and current_histogram > prev_histogram)
+
+        if base_condition or alt_condition:
             signal = "BUY"
             stop_loss = current_price - (current_atr * params['ATR_MULTIPLIER_SL'])
             take_profit = current_price + (current_atr * params['ATR_MULTIPLIER_TP'])
-            confidence = 80
-        elif pattern_confirmed and current_rsi < params['RSI_OVERSOLD'] and current_histogram > prev_histogram:
-            signal = "BUY"
-            stop_loss = current_price - (current_atr * params['ATR_MULTIPLIER_SL'])
-            take_profit = current_price + (current_atr * params['ATR_MULTIPLIER_TP'])
-            confidence = 75
+            confidence = 65  # اطمینان پایه
+            if pattern_confirmed:
+                confidence += 15  # امتیاز الگو
+            if confidence > 90:
+                confidence = 90
 
     elif trend == "DOWN":
-        if pattern_confirmed and prev_rsi >= 50 and current_rsi < 50 and current_macd < current_signal:
+        # شرایط پایه: عبور RSI به زیر 50 و MACD نزولی
+        base_condition = (prev_rsi >= 50 and current_rsi < 50 and current_macd < current_signal)
+        # شرایط جایگزین: RSI در اشباع خرید و هیستوگرام در حال کاهش
+        alt_condition = (current_rsi > params['RSI_OVERBOUGHT'] and current_histogram < prev_histogram)
+
+        if base_condition or alt_condition:
             signal = "SELL"
             stop_loss = current_price + (current_atr * params['ATR_MULTIPLIER_SL'])
             take_profit = current_price - (current_atr * params['ATR_MULTIPLIER_TP'])
-            confidence = 80
-        elif pattern_confirmed and current_rsi > params['RSI_OVERBOUGHT'] and current_histogram < prev_histogram:
-            signal = "SELL"
-            stop_loss = current_price + (current_atr * params['ATR_MULTIPLIER_SL'])
-            take_profit = current_price - (current_atr * params['ATR_MULTIPLIER_TP'])
-            confidence = 75
+            confidence = 65
+            if pattern_confirmed:
+                confidence += 15
+            if confidence > 90:
+                confidence = 90
 
     if confidence < params['MIN_CONFIDENCE']:
         return None, None, None, None
