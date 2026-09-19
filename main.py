@@ -2,6 +2,7 @@ import os
 import time
 import json
 import requests
+from biquote import Biquote
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
