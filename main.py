@@ -26,7 +26,7 @@ def get_iran_time():
     return datetime.now(IRAN_TZ)
 
 # تنظیمات
-API_KEY = os.getenv("TWELVE_DATA_API_KEY")
+# API_KEY = os.getenv("TWELVE_DATA_API_KEY")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
