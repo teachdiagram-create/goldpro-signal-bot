@@ -549,38 +549,43 @@ def get_market_data(api_manager, symbol_key, interval="5min", outputsize=50):
         return None
 
     symbol = SYMBOLS[symbol_key]["symbol"]
-    url = "https://api.twelvedata.com/time_series"
-    params = {
-        "symbol": symbol,
-        "interval": interval,
-        "outputsize": outputsize,
-        "apikey": API_KEY
+    biquote_symbol = symbol.replace("/", "")
+
+    interval_map = {
+        "1min": "1m",
+        "5min": "5m",
+        "15min": "15m",
+        "1h": "1h"
     }
+    biquote_interval = interval_map.get(interval, "5m")
 
     try:
-        response = requests.get(url, params=params, timeout=15)
+        bq = Biquote()
+        data = bq.ohlc(biquote_symbol, interval=biquote_interval, limit=outputsize)
 
-        if response.status_code == 200:
+        if data:
+            # Biquote معمولاً از قدیمی به جدید برمی‌گردونه، پس برعکس می‌کنیم
+            data = list(reversed(data))
             api_manager.record_request()
-            data = response.json()
 
-            if "values" in data:
-                return data["values"]
-            else:
-                logger.error(f"خطای API برای {symbol}: {data}")
-                return None
-        elif response.status_code == 429:
-            logger.error("Rate Limit Exceeded!")
-            time.sleep(60)
-            return None
+            # تبدیل ساختار داده Biquote به ساختار مورد انتظار کد فعلی
+            formatted_data = []
+            for candle in data:
+                formatted_data.append({
+                    "open": str(candle.get("open", candle.get("mid", 0))),
+                    "high": str(candle.get("high", candle.get("mid", 0))),
+                    "low": str(candle.get("low", candle.get("mid", 0))),
+                    "close": str(candle.get("close", candle.get("mid", 0))),
+                    "datetime": str(candle.get("time", candle.get("timestamp", "")))
+                })
+            return formatted_data
         else:
-            logger.error(f"خطای HTTP: {response.status_code}")
+            logger.error(f"داده‌ای برای {biquote_symbol} دریافت نشد")
             return None
 
     except Exception as e:
-        logger.error(f"خطا در دریافت داده {symbol}: {e}")
+        logger.error(f"خطا در دریافت داده {biquote_symbol}: {e}")
         return None
-
 
 def analyze_trend(data_5min, symbol_key):
     closes = [float(item["close"]) for item in reversed(data_5min)]
